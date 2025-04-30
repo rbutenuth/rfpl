@@ -15,9 +15,6 @@ impl FplList {
         FplList{ buckets: unsafe { Arc::new_uninit_slice(0).assume_init() } }
     }
 
-    pub fn len(&self) -> usize {
-        self.buckets.iter().map(|b| b.values.len()).sum()
-    }
 
     pub fn from_value(value: Value) -> FplList {
         let mut u_values: Arc<[MaybeUninit<Value>]> = Arc::new_uninit_slice(1);
@@ -66,8 +63,12 @@ mod tests {
     fn test_clone() {
         let list = FplList::from_value(Value::Integer(42));
         assert_eq!(1, Arc::strong_count(&(list.buckets)));
+        {
         let cloned = list.clone();
         assert_eq!(list.len(), cloned.len());
         assert_eq!(2, Arc::strong_count(&(list.buckets)));
+        assert!(Arc::ptr_eq(&list.buckets, &cloned.buckets));
+        }
+        assert_eq!(1, Arc::strong_count(&(list.buckets)));
     }
 }
