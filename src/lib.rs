@@ -3,6 +3,7 @@ use std::{error::Error, fmt, sync::Arc};
 use list::FplList;
 
 mod list;
+mod parser;
 
 
 #[derive(Debug)]
