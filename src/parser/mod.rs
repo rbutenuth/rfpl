@@ -9,8 +9,8 @@ pub enum Type {
     Quote,
     Integer { value: i64 },
     Float { value: f64 },
-    Symbol { value: String, comment: String },
-    TokString { value: String },
+    Symbol { value: String, comment: Option<String> },
+    Text { value: String },
     Eof
 }
 
@@ -23,8 +23,11 @@ impl Display for Type {
             Self::Integer { value } => write!(f, "{}", value),
             Self::Float { value } => write!(f, "{}", value),
             Self::Symbol { value, comment } => 
-                write!(f, "\n; {}\n{}", comment, value),
-            Self::TokString { value} => write!(f, "\"{}\"", value),
+                match comment {
+                    Some(c) => write!(f, "\n; {}\n{}", c, value),
+                    None => write!(f, "{}", value)
+                },
+            Self::Text { value} => write!(f, "\"{}\"", value),
             Self::Eof => write!(f, "<eof>"),
         }
     }
@@ -76,19 +79,27 @@ mod tests {
     #[test]
     fn test_symbol() {
         let t = Type::Symbol{
-            value: String::from("i-am-a-symbol"), comment: String::from("I come with a comment!")
+            value: String::from("i-am-a-symbol"), comment: None
+        };
+        assert_eq!(t.to_string(), "i-am-a-symbol");
+    }
+
+    #[test]
+    fn test_symbol_with_comment() {
+        let t = Type::Symbol{
+            value: String::from("i-am-a-symbol"), comment: Some(String::from("I come with a comment!"))
         };
         assert_eq!(t.to_string(), "\n; I come with a comment!\ni-am-a-symbol");
     }
 
     #[test]
-    fn test_string() {
-        let t = Type::TokString { value: String::from("i-am-a-string")};
+    fn test_text() {
+        let t = Type::Text { value: String::from("i-am-a-string")};
         assert_eq!(t.to_string(), "\"i-am-a-string\"");
     }
 
     #[test]
-    fn test_equal() {
+    fn test_equal_type() {
         let t1 = Type::Integer{value: 1};
         let t2 = Type::Integer{value: 1};
         assert_eq!(t1, t2);
