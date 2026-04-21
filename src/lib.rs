@@ -1,4 +1,5 @@
-use std::{error::Error, fmt, sync::Arc};
+use std::{error::Error, fmt };
+//use std::{error::Error, fmt, sync::Arc};
 
 use list::FplList;
 
@@ -54,7 +55,7 @@ pub struct FplError{
 
 impl fmt::Display for FplError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TODO")
+        write!(f, "TODO {}", self.message)
     }
 }
 

@@ -5,8 +5,8 @@ use crate::Value;
 
 use super::{Bucket, FplList};
 
-const BASE_SIZE: usize = 8;
-const FACTOR: usize = 4;
+//const BASE_SIZE: usize = 8;
+//const FACTOR: usize = 4;
 
 
 impl FplList {
@@ -29,17 +29,17 @@ impl FplList {
     }
 }
 
-pub fn experiment() {
-    let mut values = Box::<[u32]>::new_uninit_slice(3);
-    // Deferred initialization:
-    values[0].write(1);
-    values[1].write(2);
-    values[2].write(3);
-
-    let values = unsafe { values.assume_init() };
-
-    println!("value[2]: {}", values[2]);
-}
+//pub fn experiment() {
+//    let mut values = Box::<[u32]>::new_uninit_slice(3);
+//    // Deferred initialization:
+//    values[0].write(1);
+//    values[1].write(2);
+//    values[2].write(3);
+//
+//    let values = unsafe { values.assume_init() };
+//
+//    println!("value[2]: {}", values[2]);
+//}
 
 
 #[cfg(test)]

@@ -1,10 +1,11 @@
 
-use std::fmt;
-use std::sync::Arc;
+//use std::fmt;
+//use std::sync::Arc;
 
 use crate::{FplError, Value};
 
-use super::{Bucket, FplList};
+use super::{FplList};
+//use super::{Bucket, FplList};
 
 
 impl FplList {
@@ -33,7 +34,7 @@ impl FplList {
     }
 
     fn check_not_empty(&self, message: &str) -> Result<(), FplError> {
-        if (self.buckets.len() > 0) {
+        if self.buckets.len() > 0 {
             Ok(())
         } else {
             Err(FplError::new(String::from(message)))

@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 mod scanner;
 
 #[derive(Debug, PartialEq)]
-pub enum TokenValue {
+pub enum Type {
     LeftParen,
     RightParen,
     Quote,
@@ -14,7 +14,7 @@ pub enum TokenValue {
     Eof
 }
 
-impl Display for TokenValue {
+impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::LeftParen => write!(f, "("),
@@ -30,33 +30,52 @@ impl Display for TokenValue {
     }
 }
 
+const UNKNOWN: Position = Position { name: "<unknown>", line: 1, column: 1 };
+const INTERNAL: Position = Position { name: "<internal>", line: 1, column: 1 };
+
+struct Position<'a> {
+    name: &'a str,
+    line: u32,
+    column: u32,
+}
+struct Token<'a> {
+    t_type: Type,
+    position:Position<'a>,
+}
+
+impl<'a> Token<'a> {
+    fn new(t_type: Type, position: Position<'a>) -> Self {
+        Self { t_type, position }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_primitives() {
-        assert_eq!(TokenValue::LeftParen.to_string(), "(");
-        assert_eq!(TokenValue::RightParen.to_string(), ")");
-        assert_eq!(TokenValue::Quote.to_string(), "'");
-        assert_eq!(TokenValue::Eof.to_string(), "<eof>");
+        assert_eq!(Type::LeftParen.to_string(), "(");
+        assert_eq!(Type::RightParen.to_string(), ")");
+        assert_eq!(Type::Quote.to_string(), "'");
+        assert_eq!(Type::Eof.to_string(), "<eof>");
     }
 
     #[test]
     fn test_integer64() {
-        let t = TokenValue::Integer{value: 42};
+        let t = Type::Integer{value: 42};
         assert_eq!(t.to_string(), "42");
     }
 
     #[test]
     fn test_float64() {
-        let t = TokenValue::Float{value: 3.14};
+        let t = Type::Float{value: 3.14};
         assert_eq!(t.to_string(), "3.14");
     }
 
     #[test]
     fn test_symbol() {
-        let t = TokenValue::Symbol{
+        let t = Type::Symbol{
             value: String::from("i-am-a-symbol"), comment: String::from("I come with a comment!")
         };
         assert_eq!(t.to_string(), "\n; I come with a comment!\ni-am-a-symbol");
@@ -64,14 +83,14 @@ mod tests {
 
     #[test]
     fn test_string() {
-        let t = TokenValue::TokString { value: String::from("i-am-a-string")};
+        let t = Type::TokString { value: String::from("i-am-a-string")};
         assert_eq!(t.to_string(), "\"i-am-a-string\"");
     }
 
     #[test]
     fn test_equal() {
-        let t1 = TokenValue::Integer{value: 1};
-        let t2 = TokenValue::Integer{value: 1};
+        let t1 = Type::Integer{value: 1};
+        let t2 = Type::Integer{value: 1};
         assert_eq!(t1, t2);
     }
 
