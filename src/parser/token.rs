@@ -20,7 +20,6 @@ pub enum Type {
     Text {
         value: String,
     },
-    Eof,
 }
 
 impl Display for Type {
@@ -36,13 +35,12 @@ impl Display for Type {
                 None => write!(f, "{}", value),
             },
             Self::Text { value } => write!(f, "\"{}\"", value),
-            Self::Eof => write!(f, "<eof>"),
         }
     }
 }
 
 #[derive(Clone, PartialEq, Debug)]
-struct Position {
+pub struct Position {
     name: Rc<String>,
     line: u32,
     column: u32,
@@ -60,20 +58,20 @@ impl Display for Position {
     }
 }
 
-struct Token {
+pub struct Token {
     t_type: Type,
     position: Option<Position>,
 }
 
 impl Token {
-    fn new(t_type: Type) -> Self {
+    pub fn new(t_type: Type) -> Self {
         Self {
             t_type: t_type,
             position: None,
         }
     }
 
-    fn new_with_pos(t_type: Type, position: Position) -> Self {
+    pub fn new_with_pos(t_type: Type, position: Position) -> Self {
         Self {
             t_type: t_type,
             position: Some(position),
@@ -90,7 +88,6 @@ mod tests {
         assert_eq!(Type::LeftParen.to_string(), "(");
         assert_eq!(Type::RightParen.to_string(), ")");
         assert_eq!(Type::Quote.to_string(), "'");
-        assert_eq!(Type::Eof.to_string(), "<eof>");
     }
 
     #[test]
