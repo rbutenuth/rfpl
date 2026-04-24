@@ -47,8 +47,8 @@ pub struct Position {
 }
 
 impl Position {
-    fn new(name: &Rc<String>, line: u32, column: u32) -> Self {
-        Position { name: name.clone(), line, column }
+    pub fn new(name: Rc<String>, line: u32, column: u32) -> Self {
+        Position { name: name, line, column }
     }
 }
 
@@ -76,6 +76,12 @@ impl Token {
             t_type: t_type,
             position: Some(position),
         }
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.t_type)
     }
 }
 
@@ -145,7 +151,7 @@ mod tests {
     #[test]
     fn test_token_with_position() {
         let file = Rc::new(String::from("file.fpl"));
-        let pos = Position::new(&file, 1, 10);
+        let pos = Position::new(file.clone(), 1, 10);
         let t = Token::new_with_pos(Type::Integer { value: 42 }, pos);
         assert_eq!(Type::Integer { value: 42 }, t.t_type);
         assert!(t.position.is_some());
