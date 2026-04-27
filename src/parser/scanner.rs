@@ -1,114 +1,172 @@
+use super::token::{Position, Token, Type};
 use std::rc::Rc;
-use super::token::{Token, Position, Type};
 
+#[derive(Clone, PartialEq, Debug)]
+struct CharWithPosition {
+    position: Position,
+    value: char,
+}
 
 pub struct Scanner {
     // private static final String NON_SYMBOL_CHARS = "'\"()[] {}:;";
-    // private static final String NL = System.lineSeparator();
-    name: Rc<String>,
-    line: u32,
-    column: u32,
-    current_char: char,
-    next_char: char,
+    position: Position,
+    current_char: CharWithPosition,
+    next_char: CharWithPosition,
+    min_chars_available: u32,
     comment: String,
     start: bool,
-    chars_queued: u32, // no more than 2 (current_char and next_char)
     chars: Box<dyn Iterator<Item = char>>,
 }
 
 impl Scanner {
-    pub fn named(
-        name: Rc<String>,
-        line: u32,
-        column: u32,
-        chars: Box<dyn Iterator<Item = char>>,
-    ) -> Self {
+    pub fn named(initial_position: Position, chars: Box<dyn Iterator<Item = char>>) -> Self {
         let mut scanner = Scanner {
-            name: name.clone(),
-            line: line,
-            column: column,
-            current_char: '\0',
-            next_char: '\0',
+            position: initial_position,
+            current_char: CharWithPosition {
+                value: '\0',
+                position: Position::unknown(),
+            },
+            next_char: CharWithPosition {
+                value: '\0',
+                position: Position::unknown(),
+            },
+            min_chars_available: 0,
             comment: String::new(),
             start: true,
-            chars_queued: 2,
             chars: chars,
         };
-        scanner.read_char();
+        scanner.move_one_char();
         // In first line of code, # is a comment character, allowing "#!/usr/bin/fpl"
         // as first line for starting an interpreter on Unix like operating systems.
-        if scanner.current_char == '#' {
+        if !scanner.eof() && scanner.current_char.value == '#' {
             scanner.skip_rest_of_line();
         }
         scanner
     }
 
     pub fn anonymous(chars: Box<dyn Iterator<Item = char>>) -> Self {
-        Self::named(Rc::new(String::from("<unknown>")), 1, 1, chars)
-    }
-
-    fn read_char(&mut self) {
-        if self.start {
-            self.current_char = self.read_with_eof_handling();
-            self.next_char = self.read_with_eof_handling();
-        } else {
-            self.start = false;
-            self.current_char = self.next_char;
-            self.current_char = self.read_with_eof_handling();
-        }
-        match self.current_char {
-            '\n' => {
-                self.line += 1;
-                self.column = 1;
-            }
-            '\r' => {
-                self.column = 1;
-            }
-            _ => {
-                self.column += 1;
-            }
-        }
-    }
-
-    fn read_with_eof_handling(&mut self) -> char {
-        match self.chars.next() {
-            Some(ch) => {
-                ch
+        Self::named(
+            Position {
+                name: Rc::new(String::from("<unknown>")),
+                line: 1,
+                column: 0, // because we have not read the first character
             },
-            None => {
-                if self.chars_queued > 0 {
-                    self.chars_queued -= 1;
+            chars,
+        )
+    }
+
+    fn eof(&self) -> bool {
+        self.min_chars_available == 0
+    }
+
+    fn move_one_char(&mut self) {
+        if self.start {
+            match self.read_char() {
+                Some(first) => {
+                    self.current_char = first;
+                    self.min_chars_available = 1;
+                    match self.read_char() {
+                        Some(second) => {
+                            self.next_char = second;
+                            self.min_chars_available = 2;
+                        }
+                        None => {}
+                    }
                 }
-                '\0'
+                None => {}
             }
+            self.start = false;
+        } else {
+            if self.min_chars_available == 1 {
+                self.min_chars_available = 0;
+            } else {
+                match self.read_char() {
+                    Some(next) => {
+                        self.current_char = self.next_char.clone();
+                        self.next_char = next;
+                    }
+                    None => {
+                        self.min_chars_available = 1;
+                    }
+                }
+            }
+        }
+        //println!("current_char: {:?}\nnext_char:    {:?}\n eof:         {}", self.current_char, self.next_char, self.eof());
+    }
+
+    fn read_char(&mut self) -> Option<CharWithPosition> {
+        match self.chars.next() {
+            Some(ch) => match ch {
+                '\n' => {
+                    let new_pos = Position {
+                        name: self.position.name.clone(),
+                        line: self.position.line + 1,
+                        column: 1,
+                    };
+                    self.position = new_pos.clone();
+                    Some(CharWithPosition {
+                        position: new_pos,
+                        value: ch,
+                    })
+                }
+                '\r' => {
+                    let new_pos = Position {
+                        name: self.position.name.clone(),
+                        line: self.position.line,
+                        column: 1,
+                    };
+                    self.position = new_pos.clone();
+                    Some(CharWithPosition {
+                        position: new_pos,
+                        value: ch,
+                    })
+                }
+                _ => {
+                    let new_pos = Position {
+                        name: self.position.name.clone(),
+                        line: self.position.line,
+                        column: self.position.column + 1,
+                    };
+                    self.position = new_pos.clone();
+                    Some(CharWithPosition {
+                        position: new_pos,
+                        value: ch,
+                    })
+                }
+            },
+            None => None,
         }
     }
 
-    fn eof(&mut self) -> bool {
-        self.chars_queued == 0
+    fn next_char_is(&mut self, ch: char) -> bool {
+        !self.eof() && self.current_char.value == ch
+    }
+
+    fn next_char_is_whitespace(&mut self) -> bool {
+        !self.eof() && self.current_char.value.is_whitespace()
     }
 
     fn skip_rest_of_line(&mut self) -> String {
         let mut content = String::new();
-        while self.current_char != '\n' && self.current_char != '\r' && !self.eof() {
-            content.push(self.current_char);
-            self.read_char();
+        while !self.eof() && !self.next_char_is('\n') && !self.next_char_is('\r') {
+            content.push(self.current_char.value);
+            self.move_one_char();
         }
         content
     }
 
     fn skip_comment(&mut self) {
-        while self.current_char == ';' || self.current_char.is_whitespace() {
-            if self.current_char == ';' {
+        while self.next_char_is(';') || self.next_char_is_whitespace() {
+            if self.next_char_is(';') {
                 if self.comment.len() > 0 {
                     self.comment.push('\n');
                 }
-                self.read_char(); // skip ';'
+                self.move_one_char(); // skip ';'
                 let comment_line = String::from(self.skip_rest_of_line().trim());
                 self.comment += comment_line.as_str();
             } else {
-                while !self.eof() && self.current_char.is_whitespace() {
-                    self.read_char();
+                while !self.eof() && self.next_char_is_whitespace() {
+                    self.move_one_char();
                 }
             }
         }
@@ -119,28 +177,38 @@ impl Iterator for Scanner {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!("current_char: {}", self.current_char);
         if self.eof() {
             None
         } else {
             self.skip_comment();
-            let _ = Position::new(self.name.clone(), self.line, self.column);
-            if self.current_char == '(' {
-    			self.read_char();
-	    		Some(Token::new(Type::LeftParen))
-            } else {
-                todo!()
+            match self.current_char.value {
+                '(' => {
+                    self.move_one_char();
+                    Some(Token::new_with_pos(Type::LeftParen, self.current_char.position.clone()))
+                }
+                ')' => {
+                    self.move_one_char();
+                    Some(Token::new_with_pos(Type::RightParen, self.current_char.position.clone()))
+                }
+                '\'' => {
+                    self.move_one_char();
+                    Some(Token::new_with_pos(Type::Quote, self.current_char.position.clone()))
+                }
+                _ => {
+                    todo!()
+                }
             }
-/*
-		if (ch == ')') {
-			readChar();
-			return new Token(position, Id.RIGHT_PAREN);
-		} else if (ch == '\'') {
-			readChar();
-			return new Token(position, Id.QUOTE);
-		} else if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
-			return number(position);
-		} else if (ch == '"') {
+        }
+        /*
+                                        if (ch == ')') {
+                                            readChar();
+                                            return new Token(position, Id.RIGHT_PAREN);
+                                        } else if (ch == '\'') {
+                                            readChar();
+                                            return new Token(position, Id.QUOTE);
+                                        } else if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
+                                            return number(position);
+                                        } else if (ch == '"') {
 			return string(position);
 		} else if (NON_SYMBOL_CHARS.indexOf(ch) != -1) {
 			throw new ParseException(position, "Illegal character for symbol: " + (char) ch);
@@ -148,7 +216,6 @@ impl Iterator for Scanner {
 			return symbol(position);
 		}
 */
-        }
     }
 }
 
@@ -173,14 +240,28 @@ mod tests {
     }
 
     #[test]
-    fn test_lp() {
+    fn test_left_paren_with_position_check() {
         let mut sc = Scanner::anonymous(Box::new("(".chars()));
-        let next = sc.next();
+        let next = sc.next().unwrap();
+        let position = next.position.unwrap();
+        assert_eq!(1, position.line);
+        assert_eq!(1, position.column);
+        assert_eq!(String::from("<unknown>"), *position.name);
     }
 
     #[test]
     fn test_left_paren() {
         assert_eq!(String::from("("), scan_and_collect("("));
+    }
+
+    #[test]
+    fn test_right_paren() {
+        assert_eq!(String::from(")"), scan_and_collect(")"));
+    }
+
+    #[test]
+    fn test_quote() {
+        assert_eq!(String::from(")"), scan_and_collect(")"));
     }
 
     // #[test]

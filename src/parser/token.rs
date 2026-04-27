@@ -41,14 +41,18 @@ impl Display for Type {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Position {
-    name: Rc<String>,
-    line: u32,
-    column: u32,
+    pub name: Rc<String>,
+    pub line: u32,
+    pub column: u32,
 }
 
 impl Position {
     pub fn new(name: Rc<String>, line: u32, column: u32) -> Self {
         Position { name: name, line, column }
+    }
+    
+    pub fn unknown() -> Position {
+        Position::new(Rc::new(String::from("<unknown>")), 0, 0)
     }
 }
 
@@ -59,8 +63,8 @@ impl Display for Position {
 }
 
 pub struct Token {
-    t_type: Type,
-    position: Option<Position>,
+    pub t_type: Type,
+    pub position: Option<Position>,
 }
 
 impl Token {
