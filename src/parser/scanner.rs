@@ -101,22 +101,27 @@ impl Scanner {
         }
     }
 
+    // only call this when you have checked !self.eof()
+    fn next_char(&self) -> char {
+        self.lookahead[0].value
+    }
+
     fn next_char_is(&mut self, ch: char) -> bool {
-        !self.eof() && self.lookahead[0].value == ch
+        !self.eof() && self.next_char() == ch
     }
 
     fn next_char_is_whitespace(&mut self) -> bool {
-        !self.eof() && self.lookahead[0].value.is_whitespace()
+        !self.eof() && self.next_char().is_whitespace()
     }
 
     fn next_char_is_symbol_char(&mut self) -> bool {
-        !self.eof() && !NON_SYMBOL_CHARS.contains(self.lookahead[0].value)
+        !self.eof() && !NON_SYMBOL_CHARS.contains(self.next_char())
     }
 
     fn skip_rest_of_line(&mut self) -> String {
         let mut content = String::new();
         while !self.eof() && !self.next_char_is('\n') && !self.next_char_is('\r') {
-            content.push(self.lookahead[0].value);
+            content.push(self.next_char());
             self.move_one_char();
         }
         content
@@ -141,8 +146,9 @@ impl Scanner {
 
     fn symbol(&mut self) -> Token {
         let mut symbol_text = String::new();
+        let symbol_pos = self.position.clone();
         while self.next_char_is_symbol_char() {
-            symbol_text.push(self.lookahead[0].value);
+            symbol_text.push(self.next_char());
             self.move_one_char();
         }
         let opt_comment = if self.comment.len() > 0 {
@@ -150,7 +156,47 @@ impl Scanner {
         } else {
             None
         };
-        Token::new_with_pos(Type::Symbol { value: symbol_text, comment: opt_comment }, self.position.clone())
+        Token::new_with_pos(Type::Symbol { value: symbol_text, comment: opt_comment }, symbol_pos)
+    }
+
+    fn text(&mut self) -> Token {
+        self.move_one_char(); // skip leading "
+
+        let mut text = String::new();
+        while !self.eof() && self.next_char() != '"' {
+/*
+			if (ch == '\\') {
+				readChar();
+				if (ch == -1) {
+					throw new ParseException(position, "Unterminated \\ at end of input");
+				}
+				if (ch == '"') {
+					sb.append('"');
+				} else if (ch == 'n') {
+					sb.append('\n');
+				} else if (ch == 'r') {
+					sb.append('\r');
+				} else if (ch == 't') {
+					sb.append('\t');
+				} else if (ch == 'f') {
+					sb.append('\f');
+				} else if (ch == 'b') {
+					sb.append('\b');
+				} else if (ch == 'u') {
+					sb.append(readHexadecimalCharacter(position));
+				} else {
+					sb.append((char) ch);
+				}
+			} else ...
+ */
+            text.push(self.next_char());
+            self.move_one_char();
+            if self.eof() {
+                panic!("Unterminated string at end of input");
+            }
+        }
+        self.move_one_char(); // skip trailing "
+        Token::new_with_pos(Type::Text { value: text }, self.position.clone())
     }
 /*
 	private Token symbol(Position position) throws ParseException {
@@ -174,7 +220,7 @@ impl Iterator for Scanner {
         if self.eof() {
             None
         } else {
-            Some(match self.lookahead[0].value {
+            Some(match self.next_char() {
                 '(' => {
                     Token::new_with_pos(Type::LeftParen, self.move_one_char())
                 }
@@ -188,6 +234,9 @@ impl Iterator for Scanner {
                 }
                 ch if !NON_SYMBOL_CHARS.contains(ch) => {
                     self.symbol()
+                }
+                '"' => {
+                    self.text()
                 }
                 _ => {
                     todo!()
@@ -266,6 +315,11 @@ mod tests {
     fn test_symbol_with_comment() {
        // TODO
        assert_eq!(String::from("symbol"), scan_and_collect("symbol"));
+    }
+
+    #[test]
+    fn test_simple_text() {
+        assert_eq!(String::from("\"foo\""), scan_and_collect("\"foo\""));
     }
 
     /*
