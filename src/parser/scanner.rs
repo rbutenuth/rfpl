@@ -1,4 +1,5 @@
 use super::token::{Position, Token, Type};
+use core::num;
 use std::rc::Rc;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -8,6 +9,7 @@ struct CharWithPosition {
 }
 
 const NON_SYMBOL_CHARS: &str = "'\"()[] {}:;";
+const ILLEGAL_CHARS: &str = "[]{}:"; // reservered for future use (allowed in text)
 
 pub struct Scanner {
     position: Position,
@@ -164,33 +166,25 @@ impl Scanner {
 
         let mut text = String::new();
         while !self.eof() && self.next_char() != '"' {
-/*
-			if (ch == '\\') {
-				readChar();
-				if (ch == -1) {
-					throw new ParseException(position, "Unterminated \\ at end of input");
+            let ch = self.next_char();
+			if ch == '\\' {
+				self.move_one_char();
+				if self.eof() {
+					panic!("Unterminated \\ at end of input");
 				}
-				if (ch == '"') {
-					sb.append('"');
-				} else if (ch == 'n') {
-					sb.append('\n');
-				} else if (ch == 'r') {
-					sb.append('\r');
-				} else if (ch == 't') {
-					sb.append('\t');
-				} else if (ch == 'f') {
-					sb.append('\f');
-				} else if (ch == 'b') {
-					sb.append('\b');
-				} else if (ch == 'u') {
-					sb.append(readHexadecimalCharacter(position));
-				} else {
-					sb.append((char) ch);
-				}
-			} else ...
- */
-            text.push(self.next_char());
-            self.move_one_char();
+                match ch {
+                    '"' => text.push('"'),
+                    'n' => text.push('\n'),
+                    'r' => text.push('\r'),
+                    't' => text.push('\t'),
+                    'u' => text.push(self.readHexadecimalCharacter(4)),
+                    'v' => text.push(self.readHexadecimalCharacter(8)),
+                    _ => text.push(ch)
+                }
+			} else {
+                text.push(self.next_char());
+                self.move_one_char();
+            }
             if self.eof() {
                 panic!("Unterminated string at end of input");
             }
@@ -198,18 +192,32 @@ impl Scanner {
         self.move_one_char(); // skip trailing "
         Token::new_with_pos(Type::Text { value: text }, self.position.clone())
     }
-/*
-	private Token symbol(Position position) throws ParseException {
-		StringBuilder sb = new StringBuilder();
-		while (ch != -1 && !Character.isWhitespace(ch) && NON_SYMBOL_CHARS.indexOf(ch) == -1) {
-			sb.append((char) ch);
-			readChar();
-		}
-		Token t = new Token(position, Id.SYMBOL, sb.toString(), comment.toString());
-		return t;
-	}
- */
+    
+    fn readHexadecimalCharacter(&mut self, number_of_hex_digits: usize) -> char {
+        self.move_one_char(); // skip u or v
+        let mut result: u32 = 0;
+        for _ in 1..=number_of_hex_digits {
+            result <<= 4;
+            if self.eof() {
+                panic!("Unterminated string at end of input")
+            }
+            let ch = self.lookahead[0].value.to_ascii_lowercase();
+			result += self.hex_digit(ch);
+            self.move_one_char();
+        }
+        match char::from_u32(result) {
+            Some(ch) => ch,
+            None => panic!("illegal unicode value sequence")
+        }
+    }
 
+	fn hex_digit(&self, low: char) -> u32 {
+        (match low {
+            '0' .. '9' => low as u8 - '0' as u8,
+            'a' .. 'f' => low as u8 - 'a' as u8 + 10,
+            _ => panic!("illegal characterin unicode hex sequence")
+        }) as u32
+    }
 }
 
 impl Iterator for Scanner {
@@ -238,26 +246,15 @@ impl Iterator for Scanner {
                 '"' => {
                     self.text()
                 }
+                // TODO: Number, if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
+                ch if ILLEGAL_CHARS.contains(ch) => {
+                    panic!("illegal character")
+                }
                 _ => {
                     todo!()
                 }
             })
         }
-        /*
-            if (ch == ')') {
-                readChar();
-                return new Token(position, Id.RIGHT_PAREN);
-            } else if (ch == '\'') {
-                readChar();
-                return new Token(position, Id.QUOTE);
-            } else if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
-                return number(position);
-            } else if (ch == '"') {
-			return string(position);
-		} else if (NON_SYMBOL_CHARS.indexOf(ch) != -1) {
-			throw new ParseException(position, "Illegal character for symbol: " + (char) ch);
-		}
-*/
     }
 }
 
@@ -515,6 +512,9 @@ mod tests {
             assertEquals("/\f\b", t.getStringValue());
         }
     }
+
+Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to 
+U+10FFFF. Any 32-bit value higher than this is invalid.
 
     @Test
     public void hexEscape() throws Exception {
