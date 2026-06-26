@@ -1,5 +1,5 @@
-use super::token::{Position, Token, Type};
-use core::num;
+use super::token::{Token, Type};
+use super::position::Position;
 use std::rc::Rc;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -54,7 +54,7 @@ impl Scanner {
     }
 
     fn eof(&self) -> bool {
-        self.lookahead.len() == 0
+        self.lookahead.is_empty()
     }
 
     fn move_one_char(&mut self) -> Position {
@@ -165,6 +165,7 @@ impl Scanner {
         self.move_one_char(); // skip leading "
 
         let mut text = String::new();
+        // TODO: EOF in String testen (Claude meint, es ist falsch)
         while !self.eof() && self.next_char() != '"' {
             let ch = self.next_char();
 			if ch == '\\' {
@@ -172,13 +173,15 @@ impl Scanner {
 				if self.eof() {
 					panic!("Unterminated \\ at end of input");
 				}
-                match ch {
+                let esc = self.next_char();
+                self.move_one_char();
+                match esc {
                     '"' => text.push('"'),
                     'n' => text.push('\n'),
                     'r' => text.push('\r'),
                     't' => text.push('\t'),
-                    'u' => text.push(self.readHexadecimalCharacter(4)),
-                    'v' => text.push(self.readHexadecimalCharacter(8)),
+                    'u' => text.push(self.read_hexadecimal_character(4)),
+                    'v' => text.push(self.read_hexadecimal_character(8)),
                     _ => text.push(ch)
                 }
 			} else {
@@ -190,10 +193,11 @@ impl Scanner {
             }
         }
         self.move_one_char(); // skip trailing "
+        // self.position.clone() ist die Position am Ende des Textes.
         Token::new_with_pos(Type::Text { value: text }, self.position.clone())
     }
     
-    fn readHexadecimalCharacter(&mut self, number_of_hex_digits: usize) -> char {
+    fn read_hexadecimal_character(&mut self, number_of_hex_digits: usize) -> char {
         self.move_one_char(); // skip u or v
         let mut result: u32 = 0;
         for _ in 1..=number_of_hex_digits {
@@ -213,9 +217,9 @@ impl Scanner {
 
 	fn hex_digit(&self, low: char) -> u32 {
         (match low {
-            '0' .. '9' => low as u8 - '0' as u8,
-            'a' .. 'f' => low as u8 - 'a' as u8 + 10,
-            _ => panic!("illegal characterin unicode hex sequence")
+            '0' ..= '9' => low as u8 - '0' as u8,
+            'a' ..= 'f' => low as u8 - 'a' as u8 + 10,
+            _ => panic!("illegal character in unicode hex sequence")
         }) as u32
     }
 }
@@ -233,11 +237,9 @@ impl Iterator for Scanner {
                     Token::new_with_pos(Type::LeftParen, self.move_one_char())
                 }
                 ')' => {
-                    self.move_one_char();
                     Token::new_with_pos(Type::RightParen, self.move_one_char())
                 }
                 '\'' => {
-                    self.move_one_char();
                     Token::new_with_pos(Type::Quote,  self.move_one_char())
                 }
                 ch if !NON_SYMBOL_CHARS.contains(ch) => {
