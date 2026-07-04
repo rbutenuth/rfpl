@@ -1,7 +1,6 @@
 use std::fmt::{Result, Display, Formatter};
 use super::position::Position;
 
-
 #[derive(Debug, PartialEq)]
 pub enum Type {
     LeftParen,
@@ -20,7 +19,7 @@ pub enum Type {
     Text {
         value: String,
     },
-    Error {
+    NonScanable {
         message: String,
     },
 }
@@ -38,7 +37,7 @@ impl Display for Type {
                 None => write!(f, "{}", value),
             },
             Self::Text { value } => write!(f, "\"{}\"", value),
-            Self::Error { message } => write!(f, "{}", message),
+            Self::NonScanable { message } => write!(f, "{}", message),
         }
     }
 }
@@ -59,6 +58,13 @@ impl Token {
     pub fn new_with_pos(t_type: Type, position: Position) -> Self {
         Self {
             t_type: t_type,
+            position: Some(position),
+        }
+    }
+
+    pub fn new_error(message: String, position: Position) -> Self {
+        Self {
+            t_type: Type::NonScanable { message: message },
             position: Some(position),
         }
     }
@@ -122,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_error() {
-        let t = Type::Error {
+        let t = Type::NonScanable {
             message: String::from("this is bad!"),
         };
         assert_eq!(t.to_string(), "this is bad!");

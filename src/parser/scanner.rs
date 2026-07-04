@@ -1,6 +1,9 @@
-use super::token::{Token, Type};
 use super::position::Position;
-use std::rc::Rc;
+use super::token::{Token, Type};
+
+struct ScanError {
+    message: String,
+}
 
 #[derive(Clone, PartialEq, Debug)]
 struct CharWithPosition {
@@ -9,17 +12,20 @@ struct CharWithPosition {
 }
 
 const NON_SYMBOL_CHARS: &str = "'\"()[] {}:;";
-const ILLEGAL_CHARS: &str = "[]{}:"; // reservered for future use (allowed in text)
+const ILLEGAL_CHARS: &str = "[]{}:"; // reservered for future use
 
 pub struct Scanner {
-    position: Position,
+    position: Position, // The position of the next character we read.
     lookahead: Vec<CharWithPosition>,
     comment: String,
     chars: Box<dyn Iterator<Item = char>>,
 }
 
 impl Scanner {
-    pub fn named(initial_position: Position, chars: Box<dyn Iterator<Item = char>>) -> Self {
+    pub fn from_named_source(
+        initial_position: Position,
+        chars: Box<dyn Iterator<Item = char>>,
+    ) -> Self {
         let mut scanner = Scanner {
             position: initial_position,
             lookahead: Vec::with_capacity(2),
@@ -42,34 +48,28 @@ impl Scanner {
         scanner
     }
 
-    pub fn anonymous(chars: Box<dyn Iterator<Item = char>>) -> Self {
-        Self::named(
-            Position {
-                name: Rc::new(String::from("<unknown>")),
-                line: 1,
-                column: 1,
-            },
-            chars,
-        )
+    pub fn from_anonymous_source(chars: Box<dyn Iterator<Item = char>>) -> Self {
+        Self::from_named_source(Position::anonymous_start(), chars)
+    }
+
+    pub fn from_str(source: &str) -> Self {
+        let chars: Vec<char> = source.chars().collect();
+        Scanner::from_anonymous_source(Box::new(chars.into_iter()))
     }
 
     fn eof(&self) -> bool {
         self.lookahead.is_empty()
     }
 
-    fn move_one_char(&mut self) -> Position {
-        if self.eof() {
-            self.position.clone()
-        } else {
-            let pos = self.lookahead.remove(0).position;
+    fn move_one_char(&mut self) {
+        if !self.eof() {
+            self.lookahead.remove(0);
             match self.read_char() {
                 Some(ch) => {
-                    self.position = ch.position.clone();
                     self.lookahead.push(ch);
                 }
                 None => {}
             };
-            pos
         }
     }
 
@@ -104,34 +104,38 @@ impl Scanner {
     }
 
     // only call this when you have checked !self.eof()
-    fn next_char(&self) -> char {
+    fn current_char(&self) -> char {
         self.lookahead[0].value
     }
 
-    fn next_char_is(&mut self, ch: char) -> bool {
-        !self.eof() && self.next_char() == ch
+    fn current_position(&mut self) -> Position {
+        self.lookahead[0].position.clone()
     }
 
-    fn next_char_is_whitespace(&mut self) -> bool {
-        !self.eof() && self.next_char().is_whitespace()
+    fn current_char_is(&mut self, ch: char) -> bool {
+        !self.eof() && self.current_char() == ch
     }
 
-    fn next_char_is_symbol_char(&mut self) -> bool {
-        !self.eof() && !NON_SYMBOL_CHARS.contains(self.next_char())
+    fn current_char_is_whitespace(&mut self) -> bool {
+        !self.eof() && self.current_char().is_whitespace()
+    }
+
+    fn current_char_is_symbol_char(&mut self) -> bool {
+        !self.eof() && !NON_SYMBOL_CHARS.contains(self.current_char())
     }
 
     fn skip_rest_of_line(&mut self) -> String {
         let mut content = String::new();
-        while !self.eof() && !self.next_char_is('\n') && !self.next_char_is('\r') {
-            content.push(self.next_char());
+        while !self.eof() && !self.current_char_is('\n') && !self.current_char_is('\r') {
+            content.push(self.current_char());
             self.move_one_char();
         }
         content
     }
 
     fn skip_comment(&mut self) {
-        while self.next_char_is(';') || self.next_char_is_whitespace() {
-            if self.next_char_is(';') {
+        while self.current_char_is(';') || self.current_char_is_whitespace() {
+            if self.current_char_is(';') {
                 if self.comment.len() > 0 {
                     self.comment.push('\n');
                 }
@@ -139,7 +143,7 @@ impl Scanner {
                 let comment_line = String::from(self.skip_rest_of_line().trim());
                 self.comment += comment_line.as_str();
             } else {
-                while !self.eof() && self.next_char_is_whitespace() {
+                while !self.eof() && self.current_char_is_whitespace() {
                     self.move_one_char();
                 }
             }
@@ -148,9 +152,9 @@ impl Scanner {
 
     fn symbol(&mut self) -> Token {
         let mut symbol_text = String::new();
-        let symbol_pos = self.position.clone();
-        while self.next_char_is_symbol_char() {
-            symbol_text.push(self.next_char());
+        let symbol_pos = self.current_position();
+        while self.current_char_is_symbol_char() {
+            symbol_text.push(self.current_char());
             self.move_one_char();
         }
         let opt_comment = if self.comment.len() > 0 {
@@ -158,69 +162,103 @@ impl Scanner {
         } else {
             None
         };
-        Token::new_with_pos(Type::Symbol { value: symbol_text, comment: opt_comment }, symbol_pos)
+        Token::new_with_pos(
+            Type::Symbol {
+                value: symbol_text,
+                comment: opt_comment,
+            },
+            symbol_pos,
+        )
     }
 
     fn text(&mut self) -> Token {
+        let start = self.current_position();
         self.move_one_char(); // skip leading "
 
         let mut text = String::new();
-        // TODO: EOF in String testen (Claude meint, es ist falsch)
-        while !self.eof() && self.next_char() != '"' {
-            let ch = self.next_char();
-			if ch == '\\' {
-				self.move_one_char();
-				if self.eof() {
-					panic!("Unterminated \\ at end of input");
-				}
-                let esc = self.next_char();
+        while !self.eof() && self.current_char() != '"' {
+            let ch = self.current_char();
+            if ch == '\\' {
                 self.move_one_char();
-                match esc {
-                    '"' => text.push('"'),
-                    'n' => text.push('\n'),
-                    'r' => text.push('\r'),
-                    't' => text.push('\t'),
-                    'u' => text.push(self.read_hexadecimal_character(4)),
-                    'v' => text.push(self.read_hexadecimal_character(8)),
-                    _ => text.push(ch)
+                if self.eof() {
+                    return Token::new_error(
+                        String::from("\\ at end of input"),
+                        self.position.clone(),
+                    );
                 }
-			} else {
-                text.push(self.next_char());
+                let decoded = self.decode_escape_sequence();
+                match decoded {
+                    Ok(ch) => text.push(ch),
+                    Err(_) => {
+                        return Token::new_error(
+                            String::from("Invalid escape sequence"),
+                            self.position.clone(),
+                        );
+                    }
+                }
+            } else {
+                text.push(self.current_char());
                 self.move_one_char();
-            }
-            if self.eof() {
-                panic!("Unterminated string at end of input");
             }
         }
+        if self.eof() {
+            return Token::new_error(String::from("Unterminated string at end of input"), start);
+        }
         self.move_one_char(); // skip trailing "
-        // self.position.clone() ist die Position am Ende des Textes.
-        Token::new_with_pos(Type::Text { value: text }, self.position.clone())
+        Token::new_with_pos(Type::Text { value: text }, start)
     }
-    
-    fn read_hexadecimal_character(&mut self, number_of_hex_digits: usize) -> char {
+
+    // Current position is on the \ character. Try to decode the character/sequence following.
+    fn decode_escape_sequence(&mut self) -> Result<char, ScanError> {
+        let esc = self.current_char();
+        self.move_one_char();
+        match esc {
+            '"' => Ok('"'),
+            'n' => Ok('\n'),
+            'r' => Ok('\r'),
+            't' => Ok('\t'),
+            'u' => self.read_hex_sequence(4),
+            'v' => self.read_hex_sequence(8),
+            _ => Ok(esc),
+        }
+    }
+
+    fn read_hex_sequence(&mut self, number_of_hex_digits: usize) -> Result<char, ScanError> {
         self.move_one_char(); // skip u or v
         let mut result: u32 = 0;
         for _ in 1..=number_of_hex_digits {
             result <<= 4;
             if self.eof() {
-                panic!("Unterminated string at end of input")
+                return Err(ScanError {
+                    message: String::from("Unterminated string at end of input"),
+                });
             }
             let ch = self.lookahead[0].value.to_ascii_lowercase();
-			result += self.hex_digit(ch);
+            match self.parse_hex_digit(ch) {
+                Ok(value) => result += value,
+                Err(e) => return Err(e),
+            }
             self.move_one_char();
         }
         match char::from_u32(result) {
-            Some(ch) => ch,
-            None => panic!("illegal unicode value sequence")
+            Some(ch) => Ok(ch),
+            None => Err(ScanError {
+                message: String::from("illegal unicode value sequence"),
+            }),
         }
     }
 
-	fn hex_digit(&self, low: char) -> u32 {
-        (match low {
-            '0' ..= '9' => low as u8 - '0' as u8,
-            'a' ..= 'f' => low as u8 - 'a' as u8 + 10,
-            _ => panic!("illegal character in unicode hex sequence")
-        }) as u32
+    fn parse_hex_digit(&self, ch: char) -> Result<u32, ScanError> {
+        Ok((match ch {
+            '0'..='9' => ch as u8 - '0' as u8,
+            'a'..='f' => ch as u8 - 'a' as u8 + 10,
+            'A'..='F' => ch as u8 - 'A' as u8 + 10,
+            _ => {
+                return Err(ScanError {
+                    message: String::from("illegal character in unicode hex sequence"),
+                });
+            }
+        }) as u32)
     }
 }
 
@@ -232,25 +270,15 @@ impl Iterator for Scanner {
         if self.eof() {
             None
         } else {
-            Some(match self.next_char() {
-                '(' => {
-                    Token::new_with_pos(Type::LeftParen, self.move_one_char())
-                }
-                ')' => {
-                    Token::new_with_pos(Type::RightParen, self.move_one_char())
-                }
-                '\'' => {
-                    Token::new_with_pos(Type::Quote,  self.move_one_char())
-                }
-                ch if !NON_SYMBOL_CHARS.contains(ch) => {
-                    self.symbol()
-                }
-                '"' => {
-                    self.text()
-                }
+            Some(match self.current_char() {
+                '(' => Token::new_with_pos(Type::LeftParen, self.current_position()),
+                ')' => Token::new_with_pos(Type::RightParen, self.current_position()),
+                '\'' => Token::new_with_pos(Type::Quote, self.current_position()),
+                ch if !NON_SYMBOL_CHARS.contains(ch) => self.symbol(),
+                '"' => self.text(),
                 // TODO: Number, if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
                 ch if ILLEGAL_CHARS.contains(ch) => {
-                    panic!("illegal character")
+                    Token::new_error(format!("illegal character: {}", ch), self.current_position())
                 }
                 _ => {
                     todo!()
@@ -267,7 +295,7 @@ mod tests {
 
     fn scan_and_collect(source: &str) -> String {
         let chars: Vec<char> = source.chars().collect();
-        Scanner::anonymous(Box::new(chars.into_iter()))
+        Scanner::from_str(source)
             .map(|token| token.to_string())
             .collect::<Vec<String>>()
             .join(",")
@@ -275,19 +303,50 @@ mod tests {
 
     #[test]
     fn test_empty_source() {
-        let mut sc = Scanner::anonymous(Box::new("".chars()));
+        let mut sc = Scanner::from_str("");
         let next = sc.next();
         assert!(next.is_none());
     }
 
     #[test]
-    fn test_left_paren_with_position_check() {
-        let mut sc = Scanner::anonymous(Box::new("(".chars()));
+    fn test_position() {
+        let mut sc = Scanner::from_str("12\n45");
+        assert_eq!('1', sc.lookahead[0].value);
+        assert_eq!(Position::anonymous(1, 1), sc.current_position());
+        sc.move_one_char();
+
+        assert_eq!('2', sc.lookahead[0].value);
+        assert_eq!(Position::anonymous(1, 2), sc.current_position());
+        sc.move_one_char();
+
+        assert_eq!('\n', sc.lookahead[0].value);
+        assert_eq!(Position::anonymous(1, 3), sc.current_position());
+
+        sc.move_one_char();
+        assert_eq!('4', sc.lookahead[0].value);
+        assert_eq!(Position::anonymous(2, 1), sc.current_position());
+
+        sc.move_one_char();
+        assert_eq!('5', sc.lookahead[0].value);
+        assert_eq!(Position::anonymous(2, 2), sc.current_position());
+
+        sc.move_one_char();
+        assert!(sc.eof());
+    }
+
+    #[test]
+    fn test_first_line_with_shebang() {
+        let mut sc = Scanner::from_str("#!/bin/fpl\ntest");
         let next = sc.next().unwrap();
-        let position = next.position.unwrap();
-        assert_eq!(1, position.line);
-        assert_eq!(1, position.column);
-        assert_eq!(String::from("<unknown>"), *position.name);
+        assert_eq!(String::from("test"), next.to_string());
+        assert_eq!(Position::anonymous(2, 1), next.position.unwrap());
+    }
+
+    #[test]
+    fn test_left_paren_with_position_check() {
+        let mut sc = Scanner::from_str("(");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous_start(), next.position.unwrap());
     }
 
     #[test]
@@ -312,8 +371,10 @@ mod tests {
 
     #[test]
     fn test_symbol_with_comment() {
-       // TODO
-       assert_eq!(String::from("symbol"), scan_and_collect("symbol"));
+        assert_eq!(
+            String::from("symbol"),
+            scan_and_collect("symbol;some comment")
+        );
     }
 
     #[test]
@@ -323,169 +384,158 @@ mod tests {
 
     /*
 
-    @Test
-    public void symbolAndWhitespace() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("symbol   "))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("symbol", t.toString());
+        @Test
+        public void symbolAndWhitespace() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("symbol   "))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("symbol", t.toString());
+            }
         }
-    }
 
-    @Test
-    public void symbolAndLeftParenthesis() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("symbol("))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("symbol", t.toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.LEFT_PAREN, t.getId());
+        @Test
+        public void symbolAndLeftParenthesis() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("symbol("))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("symbol", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.LEFT_PAREN, t.getId());
+            }
         }
-    }
 
-    @Test
-    public void commentsAndSymbol() throws Exception {
-        String COMMENT = "commentLine1" + NL + "; commentLine2" + NL + ";commentLine3";
-        try (Scanner sc = new Scanner("test", new StringReader(";   " + COMMENT + NL + " symbol"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("symbol", t.toString());
-            assertEquals(COMMENT.replace(";", "").replace(" ", ""), t.getComment());
+        @Test
+        public void commentsAndSymbol() throws Exception {
+            String COMMENT = "commentLine1" + NL + "; commentLine2" + NL + ";commentLine3";
+            try (Scanner sc = new Scanner("test", new StringReader(";   " + COMMENT + NL + " symbol"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("symbol", t.toString());
+                assertEquals(COMMENT.replace(";", "").replace(" ", ""), t.getComment());
+            }
         }
-    }
 
-    @Test
-    public void commentAtEndOfFile() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("symbol\n; xxx"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("symbol", t.toString());
-            t = sc.next();
-            assertEquals(Id.EOF, t.getId());
+        @Test
+        public void commentAtEndOfFile() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("symbol\n; xxx"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("symbol", t.toString());
+                t = sc.next();
+                assertEquals(Id.EOF, t.getId());
+            }
         }
-    }
 
-    @Test
-    public void symbolEmptyCommentSymbol() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("bla\n;\rblubber"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("bla", t.toString());
-            String comment = t.getComment();
-            assertEquals(0, comment.length());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("blubber", t.toString());
+        @Test
+        public void symbolEmptyCommentSymbol() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("bla\n;\rblubber"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("bla", t.toString());
+                String comment = t.getComment();
+                assertEquals(0, comment.length());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("blubber", t.toString());
+            }
         }
-    }
 
-    @Test
-    public void symbolStartsWithMinus() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("-a"))) {
-            Token t = sc.next();
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("-a", t.toString());
-            assertEquals(1, t.getPosition().getLine());
-            t = sc.next();
-            assertEquals(Id.EOF, t.getId());
+        @Test
+        public void symbolStartsWithMinus() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("-a"))) {
+                Token t = sc.next();
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("-a", t.toString());
+                assertEquals(1, t.getPosition().getLine());
+                t = sc.next();
+                assertEquals(Id.EOF, t.getId());
+            }
         }
-    }
-    @Test
-    public void firstLineWithHash() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("#!/bin/fpl" + NL + "test"))) {
-            Token t = sc.next();
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("test", t.toString());
-            assertEquals(2, t.getPosition().getLine());
-            t = sc.next();
-            assertEquals(Id.EOF, t.getId());
-        }
-    }
 
-    @Test
-    public void parenthesisAndSymbol() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("'( bla \n\r) ; sinnfrei\n\r;leer\n"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.QUOTE, t.getId());
-            assertEquals("'", t.toString());
-            Position p = t.getPosition();
-            assertEquals("test", p.getName());
-            assertEquals(1, p.getLine());
-            assertEquals(2, p.getColumn());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.LEFT_PAREN, t.getId());
-            assertEquals("(", t.toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.SYMBOL, t.getId());
-            assertEquals("bla", t.getStringValue());
-            assertEquals("Position[name=\"test\", line=1, column=5]", t.getPosition().toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.RIGHT_PAREN, t.getId());
-            assertEquals(")", t.toString());
-            t = sc.next();
-            assertEquals(Id.EOF, t.getId());
+        @Test
+        public void parenthesisAndSymbol() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("'( bla \n\r) ; sinnfrei\n\r;leer\n"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.QUOTE, t.getId());
+                assertEquals("'", t.toString());
+                Position p = t.getPosition();
+                assertEquals("test", p.getName());
+                assertEquals(1, p.getLine());
+                assertEquals(2, p.getColumn());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.LEFT_PAREN, t.getId());
+                assertEquals("(", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.SYMBOL, t.getId());
+                assertEquals("bla", t.getStringValue());
+                assertEquals("Position[name=\"test\", line=1, column=5]", t.getPosition().toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.RIGHT_PAREN, t.getId());
+                assertEquals(")", t.toString());
+                t = sc.next();
+                assertEquals(Id.EOF, t.getId());
+            }
         }
-    }
 
-    @Test
-    public void number() throws Exception {
-        try (Scanner sc = new Scanner("test",
-                new StringReader("123\t-456 ;comment \n1.23e4\n-31.4e-1\n2.78E+0\n3.14\n3E2\n-.5"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.INTEGER, t.getId());
-            assertEquals(123, t.getIntegerValue());
-            assertEquals("123", t.toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.INTEGER, t.getId());
-            assertEquals(-456, t.getIntegerValue());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(1.23e4, t.getDoubleValue(), 0.001);
-            assertEquals("12300.0", t.toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(-31.4e-1, t.getDoubleValue(), 0.001);
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(2.78, t.getDoubleValue(), 0.001);
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(3.14, t.getDoubleValue(), 0.001);
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(300, t.getDoubleValue(), 0.001);
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.DOUBLE, t.getId());
-            assertEquals(-0.5, t.getDoubleValue(), 0.001);
-            Position p = t.getPosition();
-            assertEquals("test", p.getName());
-            assertEquals(7, p.getLine());
-            assertEquals(2, p.getColumn());
+        @Test
+        public void number() throws Exception {
+            try (Scanner sc = new Scanner("test",
+                    new StringReader("123\t-456 ;comment \n1.23e4\n-31.4e-1\n2.78E+0\n3.14\n3E2\n-.5"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.INTEGER, t.getId());
+                assertEquals(123, t.getIntegerValue());
+                assertEquals("123", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.INTEGER, t.getId());
+                assertEquals(-456, t.getIntegerValue());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(1.23e4, t.getDoubleValue(), 0.001);
+                assertEquals("12300.0", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(-31.4e-1, t.getDoubleValue(), 0.001);
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(2.78, t.getDoubleValue(), 0.001);
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(3.14, t.getDoubleValue(), 0.001);
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(300, t.getDoubleValue(), 0.001);
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.DOUBLE, t.getId());
+                assertEquals(-0.5, t.getDoubleValue(), 0.001);
+                Position p = t.getPosition();
+                assertEquals("test", p.getName());
+                assertEquals(7, p.getLine());
+                assertEquals(2, p.getColumn());
+            }
         }
-    }
 
-    @Test
-    public void string() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("(\"a\\\"bc\ndef\\nhij\" \r\n\"a\\tb\\rc\\n\")"))) {
+        @Test
+        public void string() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("(\"a\\\"bc\ndef\\nhij\" \r\n\"a\\tb\\rc\\n\")"))) {
             Token t = sc.next();
             assertNotNull(t);
             assertEquals(Id.LEFT_PAREN, t.getId());
@@ -493,88 +543,88 @@ mod tests {
             assertNotNull(t);
             assertEquals(Id.STRING, t.getId());
             assertEquals("a\"bc\ndef\nhij", t.getStringValue());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.STRING, t.getId());
-            assertEquals("a\tb\rc\n", t.getStringValue());
-            assertEquals("\"a\tb\rc\n\"", t.toString());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.RIGHT_PAREN, t.getId());
-            assertEquals(Id.EOF, sc.next().getId());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                assertEquals("a\tb\rc\n", t.getStringValue());
+                assertEquals("\"a\tb\rc\n\"", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.RIGHT_PAREN, t.getId());
+                assertEquals(Id.EOF, sc.next().getId());
+            }
         }
-    }
 
-    @Test
-    public void jsonEscapes() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("\"\\/\\f\\b\")"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.STRING, t.getId());
-            assertEquals("/\f\b", t.getStringValue());
+        @Test
+        public void jsonEscapes() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\/\\f\\b\")"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                assertEquals("/\f\b", t.getStringValue());
+            }
         }
-    }
 
-Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to 
-U+10FFFF. Any 32-bit value higher than this is invalid.
+    Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
+    U+10FFFF. Any 32-bit value higher than this is invalid.
 
-    @Test
-    public void hexEscape() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("\"\\u12ab\")"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.STRING, t.getId());
-            String s = t.getStringValue();
-            assertEquals(1, s.length());
-            char ch = s.charAt(0);
-            assertEquals(0x12ab, ch);
+        @Test
+        public void hexEscape() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12ab\")"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                String s = t.getStringValue();
+                assertEquals(1, s.length());
+                char ch = s.charAt(0);
+                assertEquals(0x12ab, ch);
+            }
         }
-    }
 
-    @Test
-    public void shortHexSequence() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("\"\\u12\""))) {
-            sc.next();
-            fail("missing exception");
-        } catch (ParseException pe) {
-            assertEquals("Illegal hex digit: \"", pe.getMessage());
+        @Test
+        public void shortHexSequence() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12\""))) {
+                sc.next();
+                fail("missing exception");
+            } catch (ParseException pe) {
+                assertEquals("Illegal hex digit: \"", pe.getMessage());
     
     @Test
     public void unterminatedString() throws Exception {
         assertThrows(ParseException.class, () -> {
         try (Scanner sc = new Scanner("test", new StringReader("'( bla \") ; sinnfrei"))) {
-                Token t = sc.next();
-                while (t != null) {
-                    t = sc.next();
+                    Token t = sc.next();
+                    while (t != null) {
+                        t = sc.next();
+                    }
+                }
+            });
+        }
+
+        @Test
+        public void badNumber() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("123ef456"))) {
+                try {
+                    sc.next();
+                } catch (ParseException pe) {
+                    assertEquals("Bad number: 123ef456", pe.getMessage());
                 }
             }
-        });
-    }
-
-    @Test
-    public void badNumber() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("123ef456"))) {
-            try {
-                sc.next();
-            } catch (ParseException pe) {
-                assertEquals("Bad number: 123ef456", pe.getMessage());
-            }
-        }
-    }
-    
-    @Test
-    public void badHexDigit() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12z4\""))) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("Illegal hex digit: z", pe.getMessage());
-            }
         }
 
-    @Test
-    public void badQuoting() throws Exception {
-        try (Scanner sc = new Scanner("test", new StringReader("\"\\"))) {
+        @Test
+        public void badHexDigit() throws Exception {
+                try (Scanner sc = new Scanner("test", new StringReader("\"\\u12z4\""))) {
+                    sc.next();
+                    fail("missing exception");
+                } catch (ParseException pe) {
+                    assertEquals("Illegal hex digit: z", pe.getMessage());
+                }
+            }
+
+        @Test
+        public void badQuoting() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\"))) {
     		sc.next();
 	    	fail("missing exception");
 	    } catch (ParseException pe) {
@@ -585,31 +635,31 @@ U+10FFFF. Any 32-bit value higher than this is invalid.
 	@Test
 	public void endOfSourceInHexSequence() throws Exception {
 		try (Scanner sc = new Scanner("test", new StringReader("\"\\u12"))) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("Unterminated string at end of input", pe.getMessage());
+                    sc.next();
+                    fail("missing exception");
+                } catch (ParseException pe) {
+                    assertEquals("Unterminated string at end of input", pe.getMessage());
+                }
             }
-        }
 
-        @Test
-        public void illegalSymbolCharacter() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("{"))) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("Illegal character for symbol: {", pe.getMessage());
+            @Test
+            public void illegalSymbolCharacter() throws Exception {
+                try (Scanner sc = new Scanner("test", new StringReader("{"))) {
+                    sc.next();
+                    fail("missing exception");
+                } catch (ParseException pe) {
+                    assertEquals("Illegal character for symbol: {", pe.getMessage());
+                }
             }
-        }
 
-        @Test
-        public void exceptionOnRead() throws Exception {
-            try (Scanner sc = new Scanner("test", 1, 1, new OnReadExceptionReader())) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("bäm", pe.getMessage());
+            @Test
+            public void exceptionOnRead() throws Exception {
+                try (Scanner sc = new Scanner("test", 1, 1, new OnReadExceptionReader())) {
+                    sc.next();
+                    fail("missing exception");
+                } catch (ParseException pe) {
+                    assertEquals("bäm", pe.getMessage());
+                }
             }
-        }
-    */
+        */
 }
