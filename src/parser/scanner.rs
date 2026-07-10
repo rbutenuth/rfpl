@@ -270,15 +270,16 @@ impl Iterator for Scanner {
         if self.eof() {
             None
         } else {
+            let position = self.current_position();
             Some(match self.current_char() {
-                '(' => Token::new_with_pos(Type::LeftParen, self.current_position()),
-                ')' => Token::new_with_pos(Type::RightParen, self.current_position()),
-                '\'' => Token::new_with_pos(Type::Quote, self.current_position()),
+                '(' => { self.move_one_char(); Token::new_with_pos(Type::LeftParen, position) },
+                ')' => { self.move_one_char(); Token::new_with_pos(Type::RightParen, position) },
+                '\'' => { self.move_one_char(); Token::new_with_pos(Type::Quote, position) },
                 ch if !NON_SYMBOL_CHARS.contains(ch) => self.symbol(),
                 '"' => self.text(),
                 // TODO: Number, if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
                 ch if ILLEGAL_CHARS.contains(ch) => {
-                    Token::new_error(format!("illegal character: {}", ch), self.current_position())
+                    self.move_one_char(); Token::new_error(format!("illegal character: {}", ch), position)
                 }
                 _ => {
                     todo!()
@@ -382,7 +383,80 @@ mod tests {
         assert_eq!(String::from("\"foo\""), scan_and_collect("\"foo\""));
     }
 
-    /*
+    #[test]
+    fn test_text_with_escapes() {
+        assert_eq!(String::from("\"a\"bc\ndef\nhij\""), scan_and_collect("\"a\\\"bc\ndef\\nhij\""));
+        assert_eq!(String::from("\"a\tb\rc\n\""), scan_and_collect("\"a\\tb\\rc\\n\""));
+    }
+
+/*
+        @Test
+        public void string() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("(\"a\\\"bc\ndef\\nhij\" \r\n\"a\\tb\\rc\\n\")"))) {
+            Token t = sc.next();
+            assertNotNull(t);
+            assertEquals(Id.LEFT_PAREN, t.getId());
+            t = sc.next();
+            assertNotNull(t);
+            assertEquals(Id.STRING, t.getId());
+            assertEquals("a\"bc\ndef\nhij", t.getStringValue());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                assertEquals("a\tb\rc\n", t.getStringValue());
+                assertEquals("\"a\tb\rc\n\"", t.toString());
+                t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.RIGHT_PAREN, t.getId());
+                assertEquals(Id.EOF, sc.next().getId());
+            }
+        }
+
+        @Test
+        public void jsonEscapes() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\/\\f\\b\")"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                assertEquals("/\f\b", t.getStringValue());
+            }
+        }
+
+    Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
+    U+10FFFF. Any 32-bit value higher than this is invalid.
+
+        @Test
+        public void hexEscape() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12ab\")"))) {
+                Token t = sc.next();
+                assertNotNull(t);
+                assertEquals(Id.STRING, t.getId());
+                String s = t.getStringValue();
+                assertEquals(1, s.length());
+                char ch = s.charAt(0);
+                assertEquals(0x12ab, ch);
+            }
+        }
+
+        @Test
+        public void shortHexSequence() throws Exception {
+            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12\""))) {
+                sc.next();
+                fail("missing exception");
+            } catch (ParseException pe) {
+                assertEquals("Illegal hex digit: \"", pe.getMessage());
+    
+    @Test
+    public void unterminatedString() throws Exception {
+        assertThrows(ParseException.class, () -> {
+        try (Scanner sc = new Scanner("test", new StringReader("'( bla \") ; sinnfrei"))) {
+                    Token t = sc.next();
+                    while (t != null) {
+                        t = sc.next();
+                    }
+                }
+            });
+        }
 
         @Test
         public void symbolAndWhitespace() throws Exception {
@@ -532,75 +606,8 @@ mod tests {
                 assertEquals(2, p.getColumn());
             }
         }
-
-        @Test
-        public void string() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("(\"a\\\"bc\ndef\\nhij\" \r\n\"a\\tb\\rc\\n\")"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.LEFT_PAREN, t.getId());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.STRING, t.getId());
-            assertEquals("a\"bc\ndef\nhij", t.getStringValue());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                assertEquals("a\tb\rc\n", t.getStringValue());
-                assertEquals("\"a\tb\rc\n\"", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.RIGHT_PAREN, t.getId());
-                assertEquals(Id.EOF, sc.next().getId());
-            }
-        }
-
-        @Test
-        public void jsonEscapes() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\/\\f\\b\")"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                assertEquals("/\f\b", t.getStringValue());
-            }
-        }
-
-    Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
-    U+10FFFF. Any 32-bit value higher than this is invalid.
-
-        @Test
-        public void hexEscape() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12ab\")"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                String s = t.getStringValue();
-                assertEquals(1, s.length());
-                char ch = s.charAt(0);
-                assertEquals(0x12ab, ch);
-            }
-        }
-
-        @Test
-        public void shortHexSequence() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12\""))) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("Illegal hex digit: \"", pe.getMessage());
-    
-    @Test
-    public void unterminatedString() throws Exception {
-        assertThrows(ParseException.class, () -> {
-        try (Scanner sc = new Scanner("test", new StringReader("'( bla \") ; sinnfrei"))) {
-                    Token t = sc.next();
-                    while (t != null) {
-                        t = sc.next();
-                    }
-                }
-            });
-        }
-
+*/
+/*
         @Test
         public void badNumber() throws Exception {
             try (Scanner sc = new Scanner("test", new StringReader("123ef456"))) {
