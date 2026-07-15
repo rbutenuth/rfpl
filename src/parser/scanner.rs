@@ -189,9 +189,9 @@ impl Scanner {
                 let decoded = self.decode_escape_sequence();
                 match decoded {
                     Ok(ch) => text.push(ch),
-                    Err(_) => {
+                    Err(scan_error) => {
                         return Token::new_error(
-                            String::from("Invalid escape sequence"),
+                            scan_error.message,
                             self.position.clone(),
                         );
                     }
@@ -224,8 +224,7 @@ impl Scanner {
     }
 
     fn read_hex_sequence(&mut self, number_of_hex_digits: usize) -> Result<char, ScanError> {
-        self.move_one_char(); // skip u or v
-        let mut result: u32 = 0;
+       let mut result: u32 = 0;
         for _ in 1..=number_of_hex_digits {
             result <<= 4;
             if self.eof() {
@@ -255,7 +254,7 @@ impl Scanner {
             'A'..='F' => ch as u8 - 'A' as u8 + 10,
             _ => {
                 return Err(ScanError {
-                    message: String::from("illegal character in unicode hex sequence"),
+                    message: format!("Illegal character '{}' in unicode hex sequence", ch),
                 });
             }
         }) as u32)
@@ -387,56 +386,28 @@ mod tests {
     fn test_text_with_escapes() {
         assert_eq!(String::from("\"a\"bc\ndef\nhij\""), scan_and_collect("\"a\\\"bc\ndef\\nhij\""));
         assert_eq!(String::from("\"a\tb\rc\n\""), scan_and_collect("\"a\\tb\\rc\\n\""));
+        assert_eq!(String::from("\"\u{12ab}\""), scan_and_collect("\"\\u12ab\""));
     }
 
-/*
-        @Test
-        public void string() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("(\"a\\\"bc\ndef\\nhij\" \r\n\"a\\tb\\rc\\n\")"))) {
-            Token t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.LEFT_PAREN, t.getId());
-            t = sc.next();
-            assertNotNull(t);
-            assertEquals(Id.STRING, t.getId());
-            assertEquals("a\"bc\ndef\nhij", t.getStringValue());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                assertEquals("a\tb\rc\n", t.getStringValue());
-                assertEquals("\"a\tb\rc\n\"", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.RIGHT_PAREN, t.getId());
-                assertEquals(Id.EOF, sc.next().getId());
-            }
+    #[test]
+    fn test_incomplete_hex_sequence() {
+        let mut sc = Scanner::from_str("\"\\u12\"");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 7), next.position.unwrap());
+        assert_eq!(Type::NonScanable { message: "Illegal character '\"' in unicode hex sequence".to_string() }, next.t_type);
+        // Just a different way to check for error:
+        if let Type::NonScanable {message} = next.t_type {
+            assert_eq!("Illegal character '\"' in unicode hex sequence".to_string(), message)
+        } else {
+            panic!("expected error")
         }
+    }
 
-        @Test
-        public void jsonEscapes() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\/\\f\\b\")"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                assertEquals("/\f\b", t.getStringValue());
-            }
-        }
+    /*
 
     Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
     U+10FFFF. Any 32-bit value higher than this is invalid.
 
-        @Test
-        public void hexEscape() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12ab\")"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.STRING, t.getId());
-                String s = t.getStringValue();
-                assertEquals(1, s.length());
-                char ch = s.charAt(0);
-                assertEquals(0x12ab, ch);
-            }
-        }
 
         @Test
         public void shortHexSequence() throws Exception {
