@@ -120,6 +120,14 @@ impl Scanner {
         !self.eof() && self.current_char().is_whitespace()
     }
 
+    fn char_is_digit(&mut self) -> bool {
+        !self.eof() && self.lookahead[0].value >= '0' && self.lookahead[0].value <= '9'
+    }
+
+    fn next_char_is_digit(&mut self) -> bool {
+        self.lookahead.len() >= 2 && self.lookahead[1].value >= '0' && self.lookahead[1].value <= '9'
+    }
+
     fn current_char_is_symbol_char(&mut self) -> bool {
         !self.eof() && !NON_SYMBOL_CHARS.contains(self.current_char())
     }
@@ -208,6 +216,59 @@ impl Scanner {
         Token::new_with_pos(Type::Text { value: text }, start)
     }
 
+    fn number(&mut self) -> Token {
+        let start = self.current_position();
+        let negative = if self.current_char_is('-') {
+            self.move_one_char();
+            true
+        } else {
+            false
+        };
+        let mut value: i64 = 0;
+        while self.char_is_digit() {
+            value = 10 * value + (self.current_char() as i64) - ('0' as i64);
+            self.move_one_char()
+        }
+/*
+		if (ch == '.' || ch == 'e' || ch == 'E') {
+			double dValue = value;
+			if (ch == '.') {
+				readChar();
+				double base = 0.1;
+				while (Character.isDigit(ch)) {
+					dValue += base * (ch - '0');
+					base /= 10;
+					readChar();
+				}
+			}
+			boolean negativeExponent = false;
+			if (ch == 'e' || ch == 'E') {
+				readChar();
+				if (ch == '+') {
+					readChar();
+				} else if (ch == '-') {
+					negativeExponent = true;
+					readChar();
+				}
+				int expValue = 0;
+				while (Character.isDigit(ch)) {
+					expValue = 10 * expValue + ch - '0';
+					readChar();
+				}
+				dValue *= Math.pow(10, negativeExponent ? -expValue : expValue);
+			}
+			return new Token(position, negative ? -dValue : dValue);
+		} else {
+			return new Token(position, negative ? -value : value);
+		}
+*/
+        if negative {
+            value = -value
+        }
+
+        Token::new_with_pos(Type::Integer { value: value }, start)
+    }
+
     // Current position is on the \ character. Try to decode the character/sequence following.
     fn decode_escape_sequence(&mut self) -> Result<char, ScanError> {
         let esc = self.current_char();
@@ -242,7 +303,7 @@ impl Scanner {
         match char::from_u32(result) {
             Some(ch) => Ok(ch),
             None => Err(ScanError {
-                message: String::from("illegal unicode value sequence"),
+                message: String::from("Illegal unicode value sequence"),
             }),
         }
     }
@@ -274,9 +335,10 @@ impl Iterator for Scanner {
                 '(' => { self.move_one_char(); Token::new_with_pos(Type::LeftParen, position) },
                 ')' => { self.move_one_char(); Token::new_with_pos(Type::RightParen, position) },
                 '\'' => { self.move_one_char(); Token::new_with_pos(Type::Quote, position) },
+                '0'..='9' => { self.number() },
+                '-' if self.next_char_is_digit() => { self.number() },
                 ch if !NON_SYMBOL_CHARS.contains(ch) => self.symbol(),
                 '"' => self.text(),
-                // TODO: Number, if (ch == '-' && nextIsNumberCharacter() || ch >= '0' && ch <= '9') {
                 ch if ILLEGAL_CHARS.contains(ch) => {
                     self.move_one_char(); Token::new_error(format!("illegal character: {}", ch), position)
                 }
@@ -391,6 +453,7 @@ mod tests {
 
     #[test]
     fn test_incomplete_hex_sequence() {
+        // two digits are not enough
         let mut sc = Scanner::from_str("\"\\u12\"");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 7), next.position.unwrap());
@@ -403,136 +466,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_out_of_range_unicode_value() {
+        // Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
+        // U+10FFFF. Any 32-bit value higher than this is invalid.
+        let mut sc = Scanner::from_str("\"\\v00110000\"");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 13), next.position.unwrap());
+        assert_eq!(Type::NonScanable { message: "Illegal unicode value sequence".to_string() }, next.t_type);
+    }
+
+    #[test]
+    fn test_unterminated_string() {
+        let mut sc = Scanner::from_str(" \"string without end");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 2), next.position.unwrap());
+        assert_eq!(Type::NonScanable { message: "Unterminated string at end of input".to_string() }, next.t_type);
+    }
+
+    #[test]
+    fn test_comment_at_end_of_file() {
+        let mut sc = Scanner::from_str("foo \n; bar");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 1), next.position.unwrap());
+        assert_eq!(Type::Symbol { value: "foo".to_string(), comment: Option::None }, next.t_type);
+    }
+
+    #[test]
+    fn test_symbol_starts_with_minus() {
+        let mut sc = Scanner::from_str("-foo");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 1), next.position.unwrap());
+        assert_eq!(Type::Symbol { value: "-foo".to_string(), comment: Option::None }, next.t_type);
+    }
+
+    #[test]
+    fn test_integer() {
+        let mut sc = Scanner::from_str("42");
+        let next = sc.next().unwrap();
+        assert_eq!(Position::anonymous(1, 1), next.position.unwrap());
+        assert_eq!(Type::Integer { value: 42 }, next.t_type);
+    }
+
+
     /*
-
-    Out-of-Range Values (> U+10FFFF): The Unicode standard only defines code points up to
-    U+10FFFF. Any 32-bit value higher than this is invalid.
-
-
-        @Test
-        public void shortHexSequence() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\u12\""))) {
-                sc.next();
-                fail("missing exception");
-            } catch (ParseException pe) {
-                assertEquals("Illegal hex digit: \"", pe.getMessage());
-    
-    @Test
-    public void unterminatedString() throws Exception {
-        assertThrows(ParseException.class, () -> {
-        try (Scanner sc = new Scanner("test", new StringReader("'( bla \") ; sinnfrei"))) {
-                    Token t = sc.next();
-                    while (t != null) {
-                        t = sc.next();
-                    }
-                }
-            });
-        }
-
-        @Test
-        public void symbolAndWhitespace() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("symbol   "))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("symbol", t.toString());
-            }
-        }
-
-        @Test
-        public void symbolAndLeftParenthesis() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("symbol("))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("symbol", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.LEFT_PAREN, t.getId());
-            }
-        }
-
-        @Test
-        public void commentsAndSymbol() throws Exception {
-            String COMMENT = "commentLine1" + NL + "; commentLine2" + NL + ";commentLine3";
-            try (Scanner sc = new Scanner("test", new StringReader(";   " + COMMENT + NL + " symbol"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("symbol", t.toString());
-                assertEquals(COMMENT.replace(";", "").replace(" ", ""), t.getComment());
-            }
-        }
-
-        @Test
-        public void commentAtEndOfFile() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("symbol\n; xxx"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("symbol", t.toString());
-                t = sc.next();
-                assertEquals(Id.EOF, t.getId());
-            }
-        }
-
-        @Test
-        public void symbolEmptyCommentSymbol() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("bla\n;\rblubber"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("bla", t.toString());
-                String comment = t.getComment();
-                assertEquals(0, comment.length());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("blubber", t.toString());
-            }
-        }
-
-        @Test
-        public void symbolStartsWithMinus() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("-a"))) {
-                Token t = sc.next();
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("-a", t.toString());
-                assertEquals(1, t.getPosition().getLine());
-                t = sc.next();
-                assertEquals(Id.EOF, t.getId());
-            }
-        }
-
-        @Test
-        public void parenthesisAndSymbol() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("'( bla \n\r) ; sinnfrei\n\r;leer\n"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.QUOTE, t.getId());
-                assertEquals("'", t.toString());
-                Position p = t.getPosition();
-                assertEquals("test", p.getName());
-                assertEquals(1, p.getLine());
-                assertEquals(2, p.getColumn());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.LEFT_PAREN, t.getId());
-                assertEquals("(", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.SYMBOL, t.getId());
-                assertEquals("bla", t.getStringValue());
-                assertEquals("Position[name=\"test\", line=1, column=5]", t.getPosition().toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.RIGHT_PAREN, t.getId());
-                assertEquals(")", t.toString());
-                t = sc.next();
-                assertEquals(Id.EOF, t.getId());
-            }
-        }
-
         @Test
         public void number() throws Exception {
             try (Scanner sc = new Scanner("test",
@@ -589,16 +566,6 @@ mod tests {
                 }
             }
         }
-
-        @Test
-        public void badHexDigit() throws Exception {
-                try (Scanner sc = new Scanner("test", new StringReader("\"\\u12z4\""))) {
-                    sc.next();
-                    fail("missing exception");
-                } catch (ParseException pe) {
-                    assertEquals("Illegal hex digit: z", pe.getMessage());
-                }
-            }
 
         @Test
         public void badQuoting() throws Exception {
