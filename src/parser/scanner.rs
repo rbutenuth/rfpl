@@ -229,44 +229,37 @@ impl Scanner {
             value = 10 * value + (self.current_char() as i64) - ('0' as i64);
             self.move_one_char()
         }
-/*
-		if (ch == '.' || ch == 'e' || ch == 'E') {
-			double dValue = value;
-			if (ch == '.') {
-				readChar();
-				double base = 0.1;
-				while (Character.isDigit(ch)) {
-					dValue += base * (ch - '0');
-					base /= 10;
-					readChar();
-				}
-			}
-			boolean negativeExponent = false;
-			if (ch == 'e' || ch == 'E') {
-				readChar();
-				if (ch == '+') {
-					readChar();
-				} else if (ch == '-') {
-					negativeExponent = true;
-					readChar();
-				}
-				int expValue = 0;
-				while (Character.isDigit(ch)) {
-					expValue = 10 * expValue + ch - '0';
-					readChar();
-				}
-				dValue *= Math.pow(10, negativeExponent ? -expValue : expValue);
-			}
-			return new Token(position, negative ? -dValue : dValue);
-		} else {
-			return new Token(position, negative ? -value : value);
-		}
-*/
-        if negative {
-            value = -value
+        if self.current_char_is('.') || self.current_char_is('e') || self.current_char_is('E') {
+            let mut d_value = value as f64;
+            if self.current_char_is('.') {
+               self.move_one_char();
+                let mut base = 0.1;
+                while self.char_is_digit() {
+                    d_value += base * (self.current_char() as i64 - '0' as i64) as f64;
+                    base /= 10.0;
+                    self.move_one_char();
+                }
+            }
+            let mut negative_exponent = false;
+            if self.current_char_is('e') || self.current_char_is('E') {
+                self.move_one_char();
+                if self.current_char_is('+') {
+                    self.move_one_char();
+                } else if self.current_char_is('-') {
+                    negative_exponent = true;
+                    self.move_one_char();
+                }
+                let mut exp_value: i32 = 0;
+                while self.char_is_digit() {
+                    exp_value = 10 * exp_value + (self.current_char() as i32) - ('0' as i32);
+                    self.move_one_char()
+                }
+                d_value *= (10 as f64).powi(if negative_exponent { -exp_value } else { exp_value });
+            }
+            Token::new_with_pos(Type::Float { value: if negative {-d_value} else {d_value} }, start)
+        } else {
+            Token::new_with_pos(Type::Integer { value: if negative {-value} else {value} }, start)
         }
-
-        Token::new_with_pos(Type::Integer { value: value }, start)
     }
 
     // Current position is on the \ character. Try to decode the character/sequence following.
@@ -508,103 +501,8 @@ mod tests {
         assert_eq!(Type::Integer { value: 42 }, next.t_type);
     }
 
-
-    /*
-        @Test
-        public void number() throws Exception {
-            try (Scanner sc = new Scanner("test",
-                    new StringReader("123\t-456 ;comment \n1.23e4\n-31.4e-1\n2.78E+0\n3.14\n3E2\n-.5"))) {
-                Token t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.INTEGER, t.getId());
-                assertEquals(123, t.getIntegerValue());
-                assertEquals("123", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.INTEGER, t.getId());
-                assertEquals(-456, t.getIntegerValue());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(1.23e4, t.getDoubleValue(), 0.001);
-                assertEquals("12300.0", t.toString());
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(-31.4e-1, t.getDoubleValue(), 0.001);
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(2.78, t.getDoubleValue(), 0.001);
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(3.14, t.getDoubleValue(), 0.001);
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(300, t.getDoubleValue(), 0.001);
-                t = sc.next();
-                assertNotNull(t);
-                assertEquals(Id.DOUBLE, t.getId());
-                assertEquals(-0.5, t.getDoubleValue(), 0.001);
-                Position p = t.getPosition();
-                assertEquals("test", p.getName());
-                assertEquals(7, p.getLine());
-                assertEquals(2, p.getColumn());
-            }
-        }
-*/
-/*
-        @Test
-        public void badNumber() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("123ef456"))) {
-                try {
-                    sc.next();
-                } catch (ParseException pe) {
-                    assertEquals("Bad number: 123ef456", pe.getMessage());
-                }
-            }
-        }
-
-        @Test
-        public void badQuoting() throws Exception {
-            try (Scanner sc = new Scanner("test", new StringReader("\"\\"))) {
-    		sc.next();
-	    	fail("missing exception");
-	    } catch (ParseException pe) {
-		    assertEquals("Unterminated \\ at end of input", pe.getMessage());
-	    }
-	}
-
-	@Test
-	public void endOfSourceInHexSequence() throws Exception {
-		try (Scanner sc = new Scanner("test", new StringReader("\"\\u12"))) {
-                    sc.next();
-                    fail("missing exception");
-                } catch (ParseException pe) {
-                    assertEquals("Unterminated string at end of input", pe.getMessage());
-                }
-            }
-
-            @Test
-            public void illegalSymbolCharacter() throws Exception {
-                try (Scanner sc = new Scanner("test", new StringReader("{"))) {
-                    sc.next();
-                    fail("missing exception");
-                } catch (ParseException pe) {
-                    assertEquals("Illegal character for symbol: {", pe.getMessage());
-                }
-            }
-
-            @Test
-            public void exceptionOnRead() throws Exception {
-                try (Scanner sc = new Scanner("test", 1, 1, new OnReadExceptionReader())) {
-                    sc.next();
-                    fail("missing exception");
-                } catch (ParseException pe) {
-                    assertEquals("bäm", pe.getMessage());
-                }
-            }
-        */
+    #[test]
+    fn test_numbers() {
+        assert_eq!(String::from("42,0.5,3.14,2.78,-7"), scan_and_collect("42 0.5 314e-2 0.0278E+2 -7"));
+    }
 }
