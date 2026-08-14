@@ -14,11 +14,11 @@ pub enum Value {
     Float(f64),
     List(FplList),
     Symbol(String, Option<String>), // name, comment
-    Text(String),
+    Text(String), // TODO str instead of String?
     Map(), // TODO: implement
     Object(), // TODO: implement
     Function(), // TODO: implement
-    Error(String) // TODO: nested Error, stack trace
+    Error(String) // TODO: nested Error, stack trace, str instead of String?
 }
 
 impl Clone for Value {
@@ -46,6 +46,7 @@ impl PartialEq for Value {
             (Value::Float(s), Value::Float(o)) => s == o,
             (Value::Text(s), Value::Text(o)) => s == o,
             (Value::Symbol(s, _), Value::Symbol(o, _)) => s == o,
+            (Value::Error(s), Value::Error(o)) => s == o,
             _ => false,
         }
     }
