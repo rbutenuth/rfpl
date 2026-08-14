@@ -13,7 +13,7 @@ pub enum Value {
     Integer(i64),
     Float(f64),
     List(FplList),
-    Symbol(), // TODO: implement
+    Symbol(String, Option<String>), // name, comment
     Text(String),
     Map(), // TODO: implement
     Object(), // TODO: implement
@@ -27,7 +27,7 @@ impl Clone for Value {
             Self::Nil => Self::Nil,
             Self::Integer(i) => Self::Integer(*i),
             Self::Float(f) => Self::Float(*f),
-            Self::Symbol() => Self::Symbol(),
+            Self::Symbol(n, c) => Self::Symbol(n.clone(), c.clone()),
             Self::Text(s) => Self::Text(s.clone()),
             Self::List(list) => Self::List(list.clone()),
             Self::Map() => Self::Map(),
@@ -43,7 +43,9 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Nil, Value::Nil) => true,
             (Value::Integer(s), Value::Integer(o)) => s == o,
+            (Value::Float(s), Value::Float(o)) => s == o,
             (Value::Text(s), Value::Text(o)) => s == o,
+            (Value::Symbol(s, _), Value::Symbol(o, _)) => s == o,
             _ => false,
         }
     }

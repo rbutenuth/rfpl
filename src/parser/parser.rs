@@ -17,8 +17,8 @@ impl Iterator for Parser {
 						RightParen => todo!(),
 						Quote => todo!(),
 						Integer { value } => Some(Value::Integer(value)),
-						Float { value: _} => todo!(),
-						Symbol { value: _, comment: _ } => todo!(),
+						Float { value } => Some(Value::Float(value)),
+						Symbol { value, comment} => Some(Value::Symbol(value, comment)),
 						Text { value } => Some(Value::Text(value)),
 						NonScanable { message } => Some(Error(message)),
 					}
@@ -57,35 +57,26 @@ mod tests {
 	}
 
 	#[test]
+	fn test_float_constant() {
+		let mut p = Parser::parser_from_str("3.14");
+        assert_eq!(Value::Float(3.14), p.next().unwrap());
+	}
+
+	#[test]
 	fn test_text_constant() {
 		let mut p = Parser::parser_from_str("\"a text\"");
         assert_eq!(Value::Text(String::from("a text")), p.next().unwrap());
 	}
+
+	#[test]
+	fn test_symbol_with_comment() {
+		let mut p = Parser::parser_from_str("; bla fasel\nfoo");
+		// Comment is not considered for equality of symbols
+        assert_eq!(Value::Symbol(String::from("foo"), None), p.next().unwrap());
+	}
 }
 
 /*
-
-	@Test
-	public void stringConstant() throws Exception {
-		Parser p = parser("string", "\"a string\"");
-		assertTrue(p.hasNext());
-		FplValue e = p.next();
-		assertEquals(FplString.class, e.getClass());
-		FplString s = (FplString) e;
-		assertEquals("a string", s.getContent());
-		assertFalse(p.hasNext());
-	}
-
-	@Test
-	public void integerConstant() throws Exception {
-		Parser p = parser("integer", "42");
-		assertTrue(p.hasNext());
-		FplValue e = p.next();
-		assertEquals(FplInteger.class, e.getClass());
-		FplInteger i = (FplInteger) e;
-		assertEquals(42, i.getValue());
-		assertFalse(p.hasNext());
-	}
 
 	@Test
 	public void emptyList() throws Exception {
