@@ -14,10 +14,11 @@ pub enum Value {
     Float(f64),
     List(FplList),
     Symbol(), // TODO: implement
-    String(), // TODO: implement
+    Text(String),
     Map(), // TODO: implement
     Object(), // TODO: implement
     Function(), // TODO: implement
+    Error(String) // TODO: nested Error, stack trace
 }
 
 impl Clone for Value {
@@ -27,11 +28,12 @@ impl Clone for Value {
             Self::Integer(i) => Self::Integer(*i),
             Self::Float(f) => Self::Float(*f),
             Self::Symbol() => Self::Symbol(),
-            Self::String() => Self::String(),
+            Self::Text(s) => Self::Text(s.clone()),
             Self::List(list) => Self::List(list.clone()),
             Self::Map() => Self::Map(),
             Self::Object() => Self::Object(),
             Self::Function() => Self::Function(),
+            Self::Error(m) => Self::Error(m.clone())
         }
     }
 }
@@ -41,6 +43,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Nil, Value::Nil) => true,
             (Value::Integer(s), Value::Integer(o)) => s == o,
+            (Value::Text(s), Value::Text(o)) => s == o,
             _ => false,
         }
     }

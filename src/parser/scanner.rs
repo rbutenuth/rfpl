@@ -346,10 +346,9 @@ impl Iterator for Scanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[allow(dead_code, unused)]
 
     fn scan_and_collect(source: &str) -> String {
-        let chars: Vec<char> = source.chars().collect();
+        //let chars: Vec<char> = source.chars().collect();
         Scanner::from_str(source)
             .map(|token| token.to_string())
             .collect::<Vec<String>>()
