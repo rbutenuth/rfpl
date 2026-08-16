@@ -1,27 +1,28 @@
 use crate::{
-    Value::{self, Error}, list::FplList, parser::{scanner::Scanner, token::Type::*},
+    Value::{self, Error}, list::FplList, parser::{scanner::Scanner, token::{Token, Type::*}},
 };
 
 pub struct Parser {
     scanner: Scanner,
+    next_token: Option<Token>
 }
 
 impl Iterator for Parser {
     type Item = Value;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.scanner.next() {
+        match self.next_token.take() {
             None => None,
             Some(token) => {
                 match token.t_type {
                     LeftParen => self.list(),
-                    RightParen => Some(Error(String::from("unexpected )"))), // TODO: Position
                     Quote => todo!(),
-                    Integer { value } => Some(Value::Integer(value)),
-                    Float { value } => Some(Value::Float(value)),
-                    Symbol { value, comment } => Some(Value::Symbol(value, comment)),
+                    Integer { value } => self.integer(value),
+                    Float { value } => self.float(value),
+                    Symbol { value, comment } => self.symbol(value, comment),
                     Text { value } => Some(Value::Text(value)),
                     NonScanable { message } => Some(Error(message)),
+                    _ =>  Some(Error(String::from("unexpected )"))) // TODO: Position
                 }
             }
         }
@@ -29,15 +30,40 @@ impl Iterator for Parser {
 }
 
 impl Parser {
-    pub fn from_scanner(scanner: Scanner) -> Parser {
-        Parser { scanner: scanner }
+    pub fn from_scanner(mut scanner: Scanner) -> Parser {
+        let t = scanner.next();
+        Parser { 
+            scanner: scanner,
+            next_token: t
+        }
     }
 
     pub fn parser_from_str(str: &str) -> Parser {
         Parser::from_scanner(Scanner::from_str(str))
     }
 
-	pub fn list(&mut self) -> Option<Value> {
+    fn fetch_next_token(&mut self) {
+        self.next_token = self.scanner.next();
+    }
+
+    fn integer(&mut self, i: i64) -> Option<Value> {
+        self.fetch_next_token();
+		Some(Value::Integer(i))
+	}
+
+	fn float(&mut self, f: f64) -> Option<Value> {
+        self.fetch_next_token();
+		Some(Value::Float(f))
+	}
+
+	fn symbol(&mut self, symbol: String, comment: Option<String>) -> Option<Value> {
+        self.fetch_next_token();
+		Some(Value::Symbol(symbol, comment))
+	}
+
+    fn list(&mut self) -> Option<Value> {
+        self.fetch_next_token(); // skip (
+
 		Some(Value::List(FplList::empty()))
 	}
 }
