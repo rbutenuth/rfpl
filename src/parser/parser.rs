@@ -1,10 +1,15 @@
 use crate::{
-    Value::{self, Error}, list::FplList, parser::{scanner::Scanner, token::{Token, Type::*}},
+    Value::{self, Error},
+    list::FplList,
+    parser::{
+        scanner::Scanner,
+        token::{Token, Type::*},
+    },
 };
 
 pub struct Parser {
     scanner: Scanner,
-    next_token: Option<Token>
+    next_token: Option<Token>,
 }
 
 impl Iterator for Parser {
@@ -13,18 +18,7 @@ impl Iterator for Parser {
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token.take() {
             None => None,
-            Some(token) => {
-                match token.t_type {
-                    LeftParen => self.list(),
-                    Quote => todo!(),
-                    Integer { value } => self.integer(value),
-                    Float { value } => self.float(value),
-                    Symbol { value, comment } => self.symbol(value, comment),
-                    Text { value } => Some(Value::Text(value)),
-                    NonScanable { message } => Some(Error(message)),
-                    _ =>  Some(Error(String::from("unexpected )"))) // TODO: Position
-                }
-            }
+            Some(token) => Some(self.value(token))
         }
     }
 }
@@ -32,9 +26,22 @@ impl Iterator for Parser {
 impl Parser {
     pub fn from_scanner(mut scanner: Scanner) -> Parser {
         let t = scanner.next();
-        Parser { 
+        Parser {
             scanner: scanner,
-            next_token: t
+            next_token: t,
+        }
+    }
+
+    pub fn value(&mut self, token: Token) -> Value {
+        match token.t_type {
+            LeftParen => self.list(),
+            Quote => todo!(),
+            Integer { value } => self.integer(value),
+            Float { value } => self.float(value),
+            Symbol { value, comment } => self.symbol(value, comment),
+            Text { value } => self.text(value),
+            NonScanable { message } => Error(message),
+            _ => Error(String::from("unexpected )")), // TODO: Position
         }
     }
 
@@ -42,30 +49,34 @@ impl Parser {
         Parser::from_scanner(Scanner::from_str(str))
     }
 
+    fn integer(&mut self, i: i64) -> Value {
+        self.fetch_next_token();
+        Value::Integer(i)
+    }
+
+    fn float(&mut self, f: f64) -> Value {
+        self.fetch_next_token();
+        Value::Float(f)
+    }
+
+    fn symbol(&mut self, symbol: String, comment: Option<String>) -> Value {
+        self.fetch_next_token();
+        Value::Symbol(symbol, comment)
+    }
+
+    fn text(&mut self, text: String) -> Value {
+        self.fetch_next_token();
+        Value::Text(text)
+    }
+
+    fn list(&mut self) -> Value {
+        self.fetch_next_token(); // skip (
+        Value::List(FplList::empty())
+    }
+
     fn fetch_next_token(&mut self) {
         self.next_token = self.scanner.next();
     }
-
-    fn integer(&mut self, i: i64) -> Option<Value> {
-        self.fetch_next_token();
-		Some(Value::Integer(i))
-	}
-
-	fn float(&mut self, f: f64) -> Option<Value> {
-        self.fetch_next_token();
-		Some(Value::Float(f))
-	}
-
-	fn symbol(&mut self, symbol: String, comment: Option<String>) -> Option<Value> {
-        self.fetch_next_token();
-		Some(Value::Symbol(symbol, comment))
-	}
-
-    fn list(&mut self) -> Option<Value> {
-        self.fetch_next_token(); // skip (
-
-		Some(Value::List(FplList::empty()))
-	}
 }
 
 #[cfg(test)]
@@ -126,10 +137,10 @@ mod tests {
     fn test_empty_list() {
         let mut p = Parser::parser_from_str("()");
         let value = p.next().unwrap();
-		match value {
-			Value::List(list) => assert_eq!(0, list.len()),
-			_ => panic!("list expected"),
-		}
+        match value {
+            Value::List(list) => assert_eq!(0, list.len()),
+            _ => panic!("list expected"),
+        }
     }
 }
 
