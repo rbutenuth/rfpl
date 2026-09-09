@@ -1,4 +1,4 @@
-use std::{error::Error, fmt };
+use std::{error::Error, fmt, sync::Arc };
 //use std::{error::Error, fmt, sync::Arc};
 
 use list::FplList;
@@ -13,12 +13,12 @@ pub enum Value {
     Integer(i64),
     Float(f64),
     List(FplList),
-    Symbol(String, Option<String>), // name, comment
-    Text(String), // TODO str instead of String?
+    Symbol(Arc<str>, Option<Arc<str>>), // name, comment
+    Text(Arc<str>),
     Map(), // TODO: implement
     Object(), // TODO: implement
     Function(), // TODO: implement
-    Error(String) // TODO: nested Error, stack trace, str instead of String?
+    Error(Arc<str>) // TODO: nested Error, stack trace
 }
 
 impl Clone for Value {

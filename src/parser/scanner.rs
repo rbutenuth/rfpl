@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use super::position::Position;
 use super::token::{Token, Type};
 
 struct ScanError {
-    message: String,
+    message: Arc<str>
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -166,13 +168,13 @@ impl Scanner {
             self.move_one_char();
         }
         let opt_comment = if self.comment.len() > 0 {
-            Some(self.comment.clone())
+            Some(Arc::from(self.comment.as_str()))
         } else {
             None
         };
         Token::new_with_pos(
             Type::Symbol {
-                value: symbol_text,
+                value: Arc::from(symbol_text.as_str()),
                 comment: opt_comment,
             },
             symbol_pos,
@@ -190,7 +192,7 @@ impl Scanner {
                 self.move_one_char();
                 if self.eof() {
                     return Token::new_error(
-                        String::from("\\ at end of input"),
+                        &Arc::from("\\ at end of input"),
                         self.position.clone(),
                     );
                 }
@@ -199,7 +201,7 @@ impl Scanner {
                     Ok(ch) => text.push(ch),
                     Err(scan_error) => {
                         return Token::new_error(
-                            scan_error.message,
+                            &scan_error.message,
                             self.position.clone(),
                         );
                     }
@@ -210,10 +212,10 @@ impl Scanner {
             }
         }
         if self.eof() {
-            return Token::new_error(String::from("Unterminated string at end of input"), start);
+            return Token::new_error("Unterminated string at end of input", start);
         }
         self.move_one_char(); // skip trailing "
-        Token::new_with_pos(Type::Text { value: text }, start)
+        Token::new_with_pos(Type::Text { value: Arc::from(text.as_str()) }, start)
     }
 
     fn number(&mut self) -> Token {
@@ -283,7 +285,7 @@ impl Scanner {
             result <<= 4;
             if self.eof() {
                 return Err(ScanError {
-                    message: String::from("Unterminated string at end of input"),
+                    message: Arc::from("Unterminated string at end of input"),
                 });
             }
             let ch = self.lookahead[0].value.to_ascii_lowercase();
@@ -296,7 +298,7 @@ impl Scanner {
         match char::from_u32(result) {
             Some(ch) => Ok(ch),
             None => Err(ScanError {
-                message: String::from("Illegal unicode value sequence"),
+                message: Arc::from("Illegal unicode value sequence"),
             }),
         }
     }
@@ -308,7 +310,7 @@ impl Scanner {
             'A'..='F' => ch as u8 - 'A' as u8 + 10,
             _ => {
                 return Err(ScanError {
-                    message: format!("Illegal character '{}' in unicode hex sequence", ch),
+                    message: format!("Illegal character '{}' in unicode hex sequence", ch).into(),
                 });
             }
         }) as u32)
@@ -333,7 +335,7 @@ impl Iterator for Scanner {
                 ch if !NON_SYMBOL_CHARS.contains(ch) => self.symbol(),
                 '"' => self.text(),
                 ch if ILLEGAL_CHARS.contains(ch) => {
-                    self.move_one_char(); Token::new_error(format!("illegal character: {}", ch), position)
+                    self.move_one_char(); Token::new_error(format!("illegal character: {}", ch).as_str(), position)
                 }
                 _ => {
                     todo!()
@@ -449,10 +451,10 @@ mod tests {
         let mut sc = Scanner::from_str("\"\\u12\"");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 7), next.position.unwrap());
-        assert_eq!(Type::NonScanable { message: "Illegal character '\"' in unicode hex sequence".to_string() }, next.t_type);
+        assert_eq!(Type::NonScanable { message: Arc::from("Illegal character '\"' in unicode hex sequence") }, next.t_type);
         // Just a different way to check for error:
         if let Type::NonScanable {message} = next.t_type {
-            assert_eq!("Illegal character '\"' in unicode hex sequence".to_string(), message)
+            assert_eq!(Arc::from("Illegal character '\"' in unicode hex sequence"), message)
         } else {
             panic!("expected error")
         }
@@ -465,7 +467,7 @@ mod tests {
         let mut sc = Scanner::from_str("\"\\v00110000\"");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 13), next.position.unwrap());
-        assert_eq!(Type::NonScanable { message: "Illegal unicode value sequence".to_string() }, next.t_type);
+        assert_eq!(Type::NonScanable { message: Arc::from("Illegal unicode value sequence".to_string()) }, next.t_type);
     }
 
     #[test]
@@ -473,7 +475,7 @@ mod tests {
         let mut sc = Scanner::from_str(" \"string without end");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 2), next.position.unwrap());
-        assert_eq!(Type::NonScanable { message: "Unterminated string at end of input".to_string() }, next.t_type);
+        assert_eq!(Type::NonScanable { message: Arc::from("Unterminated string at end of input".to_string()) }, next.t_type);
     }
 
     #[test]
@@ -481,7 +483,7 @@ mod tests {
         let mut sc = Scanner::from_str("foo \n; bar");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 1), next.position.unwrap());
-        assert_eq!(Type::Symbol { value: "foo".to_string(), comment: Option::None }, next.t_type);
+        assert_eq!(Type::Symbol { value: Arc::from("foo"), comment: Option::None }, next.t_type);
     }
 
     #[test]
@@ -489,7 +491,7 @@ mod tests {
         let mut sc = Scanner::from_str("-foo");
         let next = sc.next().unwrap();
         assert_eq!(Position::anonymous(1, 1), next.position.unwrap());
-        assert_eq!(Type::Symbol { value: "-foo".to_string(), comment: Option::None }, next.t_type);
+        assert_eq!(Type::Symbol { value: Arc::from("-foo"), comment: Option::None }, next.t_type);
     }
 
     #[test]

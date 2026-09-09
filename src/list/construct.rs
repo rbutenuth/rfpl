@@ -27,6 +27,14 @@ impl FplList {
         mutuable[0].write(bucket);
         FplList{ buckets: unsafe { u_buckets.assume_init() }}
     }
+
+    pub fn from_values(elements: Vec<Value>) -> FplList {
+        if elements.len() == 0 {
+            FplList::empty()
+        } else {
+            todo!()
+        }
+    }
 }
 
 //pub fn experiment() {

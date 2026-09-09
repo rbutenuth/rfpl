@@ -1,4 +1,4 @@
-use std::fmt::{Result, Display, Formatter};
+use std::{fmt::{Display, Formatter, Result}, sync::Arc};
 use super::position::Position;
 
 #[derive(Debug, PartialEq)]
@@ -13,14 +13,14 @@ pub enum Type {
         value: f64,
     },
     Symbol {
-        value: String,
-        comment: Option<String>,
+        value: Arc<str>,
+        comment: Option<Arc<str>>
     },
     Text {
-        value: String,
+        value: Arc<str>,
     },
     NonScanable {
-        message: String,
+        message: Arc<str>,
     },
 }
 
@@ -32,7 +32,7 @@ impl Display for Type {
             Self::Quote => write!(f, "'"),
             Self::Integer { value } => write!(f, "{}", value),
             Self::Float { value } => write!(f, "{}", value),
-            Self::Symbol { value, comment } => match comment {
+            Self::Symbol{ value, comment} => match comment {
                 Some(c) => write!(f, "\n; {}\n{}", c, value),
                 None => write!(f, "{}", value),
             },
@@ -62,9 +62,9 @@ impl Token {
         }
     }
 
-    pub fn new_error(message: String, position: Position) -> Self {
+    pub fn new_error(message: &str, position: Position) -> Self {
         Self {
-            t_type: Type::NonScanable { message: message },
+            t_type: Type::NonScanable { message: Arc::from(message) },
             position: Some(position),
         }
     }
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn test_symbol() {
         let t = Type::Symbol {
-            value: String::from("i-am-a-symbol"),
+            value: Arc::from("i-am-a-symbol"),
             comment: None,
         };
         assert_eq!(t.to_string(), "i-am-a-symbol");
@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn test_symbol_with_comment() {
         let t = Type::Symbol {
-            value: String::from("i-am-a-symbol"),
-            comment: Some(String::from("I come with a comment!")),
+            value: Arc::from("i-am-a-symbol"),
+            comment: Some(Arc::from("I come with a comment!")),
         };
         assert_eq!(t.to_string(), "\n; I come with a comment!\ni-am-a-symbol");
     }
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_text() {
         let t = Type::Text {
-            value: String::from("i-am-a-string"),
+            value: Arc::from("i-am-a-string"),
         };
         assert_eq!(t.to_string(), "\"i-am-a-string\"");
     }
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_error() {
         let t = Type::NonScanable {
-            message: String::from("this is bad!"),
+            message: Arc::from("this is bad!"),
         };
         assert_eq!(t.to_string(), "this is bad!");
     }
