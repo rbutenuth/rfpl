@@ -5,8 +5,8 @@ use crate::Value;
 
 use super::{Bucket, FplList};
 
-//const BASE_SIZE: usize = 8;
-//const FACTOR: usize = 4;
+const BASE_SIZE: usize = 8;
+const FACTOR: usize = 4;
 
 
 impl FplList {
